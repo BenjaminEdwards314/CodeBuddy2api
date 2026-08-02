@@ -71,7 +71,7 @@ class SecurityConfig:
 HTTP_CLIENT_CONFIG = {
     "verify": SecurityConfig.get_ssl_verify(),
     "timeout": httpx.Timeout(300.0, connect=30.0, read=300.0),
-    "limits": httpx.Limits(max_keepalive_connections=20, max_connections=100)
+    "limits": httpx.Limits(max_keepalive_connections=4000, max_connections=4000)
 }
 
 # --- 异步安全的 HTTP 客户端池 ---
@@ -383,6 +383,10 @@ class StreamResponseAggregator:
         # 聚合内容
         if delta.get('content'):
             self.data["content"] += delta.get('content')
+
+        # 聚合思考过程（reasoning_content）：非流式模式下默认会被丢弃，这里补上
+        if delta.get('reasoning_content'):
+            self.data["reasoning_content"] = (self.data.get("reasoning_content") or "") + delta.get('reasoning_content')
         
         # 处理工具调用
         if delta.get('tool_calls'):
@@ -453,6 +457,8 @@ class StreamResponseAggregator:
         
         # 构建最终响应
         final_message = {"role": "assistant", "content": self.data["content"]}
+        if self.data.get("reasoning_content"):
+            final_message["reasoning_content"] = self.data["reasoning_content"]
         if self.data["tool_calls"]:
             final_message["tool_calls"] = self.data["tool_calls"]
         
