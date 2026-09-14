@@ -4,11 +4,26 @@ Serves the frontend for CodeBuddy2API management interface.
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
 import os
+import sys
 
 router = APIRouter()
 
+
+def _frontend_dir() -> str:
+    """Locate the frontend directory, both from source and inside a bundle."""
+    # PyInstaller unpacks bundled data files under sys._MEIPASS.
+    bundle_dir = getattr(sys, "_MEIPASS", None)
+    if bundle_dir:
+        candidate = os.path.join(bundle_dir, "frontend")
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(os.path.dirname(__file__), "..", "frontend")
+
+
+_FRONTEND_DIR = _frontend_dir()
+
 # Get the absolute path to the admin interface file
-HTML_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "admin.html")
+HTML_FILE_PATH = os.path.join(_FRONTEND_DIR, "admin.html")
 
 @router.get("/", response_class=FileResponse, include_in_schema=False)
 async def serve_frontend():

@@ -9,20 +9,31 @@ import base64
 import json
 import uuid
 import time
+from urllib.parse import urlparse
 from typing import Dict, Any, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from config import get_server_password
+from config import get_server_password, get_codebuddy_api_endpoint
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-CODEBUDDY_BASE_URL = 'https://www.codebuddy.ai'
+# 认证域名跟随 CODEBUDDY_API_ENDPOINT / CODEBUDDY_INTERNET_ENVIRONMENT：
+# 国内(internal/ioa) 走 copilot.tencent.com，否则走 www.codebuddy.ai。
+# 令牌与区域绑定，用错域名登录会拿到无法使用的凭证。
+_CODEBUDDY_FALLBACK_BASE_URL = 'https://www.codebuddy.ai'
+CODEBUDDY_BASE_URL = get_codebuddy_api_endpoint() or _CODEBUDDY_FALLBACK_BASE_URL
 CODEBUDDY_AUTH_TOKEN_ENDPOINT = f'{CODEBUDDY_BASE_URL}/v2/plugin/auth/token'
 CODEBUDDY_AUTH_STATE_ENDPOINT = f'{CODEBUDDY_BASE_URL}/v2/plugin/auth/state'
+# 静默续期：用 refresh_token 换新的 access_token，全程无需用户登录。
+# 这是让凭证长期可用的关键——access_token 约 60 天过期，但只要在
+# refresh_token 有效期内（约 90 天）就能一直续下去。
+CODEBUDDY_AUTH_REFRESH_ENDPOINT = f'{CODEBUDDY_BASE_URL}/v2/plugin/auth/token/refresh'
+CODEBUDDY_AUTH_HOST = urlparse(CODEBUDDY_BASE_URL).netloc or 'www.codebuddy.ai'
 _last_auth_state: Optional[str] = None
 
 # --- Router Setup ---
@@ -64,14 +75,14 @@ def get_auth_start_headers() -> Dict[str, str]:
     """生成启动认证(/state)所需的请求头"""
     request_id = str(uuid.uuid4()).replace('-', '')
     return {
-        'Host': 'www.codebuddy.ai',
+        'Host': CODEBUDDY_AUTH_HOST,
         'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
         'Connection': 'close',
         'X-Requested-With': 'XMLHttpRequest',
-        'X-Domain': 'www.codebuddy.ai',
+        'X-Domain': CODEBUDDY_AUTH_HOST,
         'X-No-Authorization': 'true',
         'X-No-User-Id': 'true',
         'X-No-Enterprise-Id': 'true',
@@ -86,7 +97,7 @@ def get_auth_poll_headers() -> Dict[str, str]:
     request_id = str(uuid.uuid4()).replace('-', '')
     span_id = secrets.token_hex(8)
     return {
-        'Host': 'www.codebuddy.ai',
+        'Host': CODEBUDDY_AUTH_HOST,
         'Accept': 'application/json, text/plain, */*',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
@@ -102,7 +113,7 @@ def get_auth_poll_headers() -> Dict[str, str]:
         'X-No-User-Id': 'true',
         'X-No-Enterprise-Id': 'true',
         'X-No-Department-Info': 'true',
-        'X-Domain': 'www.codebuddy.ai',
+        'X-Domain': CODEBUDDY_AUTH_HOST,
         'User-Agent': 'CLI/1.0.8 CodeBuddy/1.0.8',
         'X-Product': 'SaaS',
     }
@@ -241,6 +252,109 @@ async def poll_codebuddy_auth_status(auth_state: str) -> Dict[str, Any]:
             "status": "error",
             "message": f"轮询失败: {str(e)}"
         }
+
+async def refresh_codebuddy_token(refresh_token: str) -> Optional[Dict[str, Any]]:
+    """用 refresh_token 静默换取新的 access_token（无需用户登录）。
+
+    成功返回新的 token 数据字典，失败返回 None。
+    """
+    if not refresh_token:
+        return None
+    headers = {
+        'Host': CODEBUDDY_AUTH_HOST,
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/json',
+        'X-Refresh-Token': refresh_token,
+        'X-Domain': CODEBUDDY_AUTH_HOST,
+        'User-Agent': 'CLI/1.0.8 CodeBuddy/1.0.8',
+        'X-Product': 'SaaS',
+        'X-Request-ID': str(uuid.uuid4()).replace('-', ''),
+    }
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            resp = await client.post(
+                CODEBUDDY_AUTH_REFRESH_ENDPOINT,
+                json={'refresh_token': refresh_token},
+                headers=headers,
+                timeout=30,
+            )
+        if resp.status_code != 200:
+            logger.warning(f"刷新 token 失败: HTTP {resp.status_code}")
+            return None
+        payload = resp.json()
+        if payload.get('code') != 0 or not payload.get('data'):
+            logger.warning(f"刷新 token 返回异常: {payload.get('code')} {payload.get('msg')}")
+            return None
+        data = payload['data']
+        access = data.get('accessToken') or data.get('access_token')
+        if not access:
+            return None
+        return {
+            'access_token': access,
+            'bearer_token': access,
+            'refresh_token': data.get('refreshToken') or refresh_token,
+            'expires_in': data.get('expiresIn'),
+            'token_type': data.get('tokenType', 'Bearer'),
+            'scope': data.get('scope'),
+            'domain': data.get('domain') or CODEBUDDY_AUTH_HOST,
+        }
+    except Exception as exc:
+        logger.warning(f"刷新 token 异常: {exc}")
+        return None
+
+
+async def refresh_saved_token_file(path: str, force: bool = False) -> bool:
+    """给已保存的凭证文件做静默续期；成功则就地更新。
+
+    仅在剩余有效期低于阈值（或 force）时才真正请求，避免无谓调用。
+    失败原因会通过 _LAST_REFRESH_REASON 暴露给调用方（如缺少 refresh_token）。
+    """
+    try:
+        import json as _json
+        with open(path, 'r', encoding='utf-8') as fh:
+            cred = _json.load(fh)
+    except Exception:
+        return False
+
+    refresh_token = cred.get('refresh_token')
+    if not refresh_token:
+        return False
+
+    # 判断是否需要续期：解析 access_token 的 exp
+    if not force:
+        token = cred.get('bearer_token') or ''
+        exp = 0
+        try:
+            parts = token.split('.')
+            if len(parts) >= 2:
+                payload = parts[1] + '=' * (-len(parts[1]) % 4)
+                exp = _json.loads(base64.urlsafe_b64decode(payload)).get('exp', 0)
+        except Exception:
+            exp = 0
+        # 剩余超过 7 天就先不动
+        if exp and (exp - time.time()) > 7 * 86400:
+            return False
+
+    refreshed = await refresh_codebuddy_token(refresh_token)
+    if not refreshed:
+        return False
+
+    cred.update({
+        'bearer_token': refreshed['access_token'],
+        'refresh_token': refreshed['refresh_token'],
+        'expires_in': refreshed.get('expires_in'),
+        'token_type': refreshed.get('token_type', 'Bearer'),
+        'refreshed_at': int(time.time()),
+    })
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            _json.dump(cred, fh, ensure_ascii=False, indent=2)
+        logger.info(f"已静默续期凭证: {os.path.basename(path)}")
+        return True
+    except Exception as exc:
+        logger.warning(f"写入续期凭证失败: {exc}")
+        return False
+
 
 async def save_codebuddy_token(token_data: Dict[str, Any]) -> bool:
     """保存CodeBuddy token到文件"""
@@ -433,6 +547,80 @@ async def poll_for_token(
             "error": "missing_parameters",
             "error_description": "缺少必要的参数：auth_state"
         }, status_code=400)
+
+@router.post("/auth/refresh", summary="Silently refresh a saved credential")
+async def refresh_credential(
+    filename: str = Body(None, embed=True),
+    force: bool = Body(False, embed=True),
+    _auth: str = Depends(authenticate),
+):
+    """用 refresh_token 静默续期凭证，无需用户重新登录。"""
+
+    from .codebuddy_token_manager import codebuddy_token_manager
+
+    cred_dir = codebuddy_token_manager.creds_dir
+    if not filename:
+        return JSONResponse(
+            content={"success": False, "message": "缺少 filename"},
+            status_code=400,
+        )
+
+    # 防目录穿越：只取 basename 并限制在凭证目录内
+    safe = os.path.basename(filename)
+    path = os.path.join(cred_dir, safe)
+    if not safe.endswith('.json') or not os.path.isfile(path):
+        return JSONResponse(
+            content={"success": False, "message": f"凭证不存在: {safe}"},
+            status_code=404,
+        )
+
+    ok = await refresh_saved_token_file(path, force=bool(force))
+    return JSONResponse(content={
+        "success": ok,
+        "filename": safe,
+        "message": "已续期" if ok else "无需续期或续期失败（refresh_token 可能已过期）",
+    }, status_code=200 if ok else 400)
+
+
+@router.post("/auth/refresh-all", summary="Silently refresh every saved credential")
+async def refresh_all_credentials(
+    force: bool = Body(False, embed=True),
+    _auth: str = Depends(authenticate),
+):
+    """批量静默续期所有凭证。"""
+
+    from .codebuddy_token_manager import codebuddy_token_manager
+
+    cred_dir = codebuddy_token_manager.creds_dir
+    results = []
+    try:
+        for name in sorted(os.listdir(cred_dir)):
+            if not name.endswith('.json') or name == 'manager_state.json':
+                continue
+            path = os.path.join(cred_dir, name)
+            try:
+                # 先看这个凭证有没有 refresh_token —— 没有就永远无法静默续期，
+                # 需要前端明确提示用户重新登录，而不是当成普通失败。
+                has_rt = False
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        has_rt = bool(json.load(fh).get('refresh_token'))
+                except Exception:
+                    has_rt = False
+
+                ok = await refresh_saved_token_file(path, force=bool(force))
+                entry = {"filename": name, "refreshed": ok}
+                if not ok and not has_rt:
+                    entry["no_refresh_token"] = True
+                results.append(entry)
+            except Exception as exc:
+                results.append({"filename": name, "refreshed": False, "error": str(exc)})
+    except Exception as exc:
+        return JSONResponse(content={"success": False, "message": str(exc)}, status_code=500)
+
+    n = sum(1 for r in results if r["refreshed"])
+    return JSONResponse(content={"success": True, "refreshed": n, "total": len(results), "results": results})
+
 
 @router.get("/auth/callback", summary="OAuth2 callback endpoint")
 async def oauth_callback(code: str = None, state: str = None, error: str = None):

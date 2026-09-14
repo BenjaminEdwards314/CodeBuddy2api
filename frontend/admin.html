@@ -4,24 +4,44 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CodeBuddy2API 管理控制面板</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- 图标字体按非阻塞方式加载：CDN 不可达时不应阻塞页面渲染 -->
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <noscript>
+        <link rel="stylesheet"
+              href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    </noscript>
     <style>
         :root {
-            --primary-color: #3b82f6;
-            --primary-dark: #2563eb;
-            --secondary-color: #64748b;
-            --success-color: #10b981;
-            --warning-color: #f59e0b;
-            --error-color: #ef4444;
-            --background-light: #f8fafc;
-            --background-dark: #1e293b;
+            /* 轻奢配色：低饱和金铜 + 深墨 + 暖白 */
+            --primary-color: #a8763e;          /* 金铜 */
+            --primary-dark: #8c5f2e;
+            --primary-soft: rgba(168, 118, 62, 0.10);
+            --accent-color: #1f6f6b;           /* 深青，作为点缀 */
+            --secondary-color: #6b7280;
+            --success-color: #3f8f6b;
+            --warning-color: #b5852f;
+            --error-color: #b4493f;
+            --background-light: #f6f4f1;       /* 暖白 */
+            --background-dark: #14161c;
             --card-light: #ffffff;
-            --card-dark: #334155;
-            --text-light: #1f2937;
-            --text-dark: #f1f5f9;
-            --border-light: #e2e8f0;
-            --border-dark: #475569;
+            --card-dark: #1c1f27;
+            --text-light: #1b1d22;
+            --text-dark: #ecebe8;
+            --border-light: rgba(27, 29, 34, 0.08);
+            --border-dark: rgba(236, 235, 232, 0.12);
+            --muted-light: #6b6f76;
+            --muted-dark: #a2a6ad;
             --sidebar-width: 280px;
+
+            /* 阴影与圆角，统一质感 */
+            --shadow-sm: 0 1px 2px rgba(24, 20, 15, 0.04);
+            --shadow-md: 0 4px 16px rgba(24, 20, 15, 0.06), 0 1px 3px rgba(24, 20, 15, 0.04);
+            --shadow-lg: 0 12px 40px rgba(24, 20, 15, 0.10), 0 2px 8px rgba(24, 20, 15, 0.05);
+            --radius-sm: 0.5rem;
+            --radius-md: 0.85rem;
+            --radius-lg: 1.15rem;
+            --ease: cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         * {
@@ -31,15 +51,25 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--background-light);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             color: var(--text-light);
-            transition: all 0.3s ease;
+            background-color: var(--background-light);
+            /* 极淡的光晕，让平面不呆板 */
+            background-image:
+                radial-gradient(1100px 520px at 8% -10%, rgba(168, 118, 62, 0.07), rgba(168, 118, 62, 0) 65%),
+                radial-gradient(900px 480px at 96% 0%, rgba(31, 111, 107, 0.06), rgba(31, 111, 107, 0) 62%);
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.35s var(--ease), color 0.35s var(--ease);
         }
 
         body.dark {
-            background-color: var(--background-dark);
             color: var(--text-dark);
+            background-color: var(--background-dark);
+            background-image:
+                radial-gradient(1100px 520px at 8% -10%, rgba(168, 118, 62, 0.13), rgba(168, 118, 62, 0) 65%),
+                radial-gradient(900px 480px at 96% 0%, rgba(31, 111, 107, 0.11), rgba(31, 111, 107, 0) 62%);
         }
 
         /* 顶部导航栏 */
@@ -69,66 +99,102 @@
             gap: 1rem;
         }
 
-        .theme-toggle {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .theme-toggle:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
-
         /* 主要内容区域 */
         .main-content {
-            margin-top: 80px;
-            padding: 2rem;
+            padding: 2.25rem 2rem 3rem;
             max-width: 1400px;
             margin-left: auto;
             margin-right: auto;
         }
 
         /* 导航标签 */
+        /* 顶部导航：贴合页面原有观感，滚动时保持固定。
+           不使用 backdrop-filter —— 它与 sticky 同用会在滚动时反复重绘，产生抖动。 */
         .nav-tabs {
             display: flex;
-            gap: 0.5rem;
-            margin-bottom: 2rem;
-            border-bottom: 2px solid var(--border-light);
-            padding-bottom: 0;
+            align-items: center;
+            gap: 0.25rem;
+            margin: 0 0 1.75rem;
+            padding: 0.4rem 0.5rem;
+            background: var(--card-light);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            position: sticky;
+            /* 与静止位置重合：起始就在 2.25rem 处，滚动时零位移，
+               同时保留距窗口顶部的呼吸空间（不被窗口边缘贴住）。 */
+            top: 2.25rem;
+            z-index: 60;
         }
+        body.dark .nav-tabs {
+            background: var(--card-dark);
+            border-color: var(--border-dark);
+        }
+        .nav-spacer { flex: 1; }
+        .nav-icon-btn {
+            width: 2.1rem; height: 2.1rem;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: 1px solid transparent; border-radius: 0.6rem;
+            background: transparent; color: var(--secondary-color);
+            cursor: pointer; font-size: 0.95rem;
+            transition: all 0.22s var(--ease);
+        }
+        .nav-icon-btn:hover {
+            background: var(--primary-soft);
+            color: var(--primary-color);
+            border-color: color-mix(in srgb, var(--primary-color) 30%, transparent);
+            transform: translateY(-1px);
+        }
+        .nav-icon-btn:active { transform: translateY(0) scale(0.95); }
+        body.dark .nav-icon-btn:hover { color: #d9b384; background: rgba(168,118,62,0.18); }
 
         body.dark .nav-tabs {
             border-bottom-color: var(--border-dark);
         }
 
         .nav-tab {
-            padding: 0.75rem 1.5rem;
-            background: none;
+            position: relative;
+            padding: 0.6rem 1.15rem;
+            background: transparent;
             border: none;
+            border-radius: 0.65rem;
             color: var(--secondary-color);
             cursor: pointer;
-            border-bottom: 2px solid transparent;
-            transition: all 0.2s ease;
             font-weight: 500;
+            font-size: 0.92rem;
+            letter-spacing: 0.01em;
+            transition: color 0.25s var(--ease), background 0.25s var(--ease), transform 0.18s var(--ease);
         }
-
-        .nav-tab:hover {
-            color: var(--primary-color);
-        }
-
+        .nav-tab i { margin-right: 0.35rem; opacity: 0.85; transition: transform 0.25s var(--ease); }
+        .nav-tab:hover { color: var(--primary-color); background: var(--primary-soft); }
+        .nav-tab:hover i { transform: translateY(-1px) scale(1.06); }
+        .nav-tab:active { transform: scale(0.97); }
         .nav-tab.active {
             color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
+            background: var(--primary-soft);
+            font-weight: 600;
         }
+        .nav-tab.active::after {
+            content: "";
+            position: absolute;
+            left: 50%; bottom: 0.28rem;
+            width: 1.15rem; height: 2px;
+            border-radius: 2px;
+            background: var(--primary-color);
+            transform: translateX(-50%);
+            animation: tabUnderline 0.32s var(--ease);
+        }
+        @keyframes tabUnderline {
+            from { width: 0; opacity: 0; }
+            to   { width: 1.15rem; opacity: 1; }
+        }
+        body.dark .nav-tab.active { color: #d9b384; background: rgba(168,118,62,0.16); }
+        body.dark .nav-tab:hover { color: #d9b384; background: rgba(168,118,62,0.12); }
 
         /* 标签面板 */
         .tab-panel {
             display: none;
-            animation: fadeIn 0.3s ease;
+            animation: fadeIn 0.42s var(--ease);
         }
 
         .tab-panel.active {
@@ -144,11 +210,10 @@
         .card {
             background: var(--card-light);
             border: 1px solid var(--border-light);
-            border-radius: 0.75rem;
-            padding: 1.5rem;
+            border-radius: var(--radius-lg);
+            padding: 1.6rem;
             margin-bottom: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
+            box-shadow: var(--shadow-md);
         }
 
         body.dark .card {
@@ -160,9 +225,15 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
-            padding-bottom: 1rem;
+            gap: 1rem;
+            margin-bottom: 1.1rem;
+            padding-bottom: 0.95rem;
             border-bottom: 1px solid var(--border-light);
+        }
+        .card-title {
+            font-size: 1.16rem;
+            font-weight: 650;
+            letter-spacing: -0.01em;
         }
 
         body.dark .card-header {
@@ -183,16 +254,23 @@
         .btn {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 0.5rem;
+            justify-content: center;
+            gap: 0.45rem;
+            padding: 0.66rem 1.25rem;
+            border: 1px solid transparent;
+            border-radius: 0.65rem;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s ease;
             text-decoration: none;
             font-size: 0.9rem;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
+            transition: transform 0.18s var(--ease), box-shadow 0.25s var(--ease),
+                        background 0.25s var(--ease), border-color 0.25s var(--ease), color 0.25s var(--ease);
         }
+        .btn:hover { transform: translateY(-1.5px); box-shadow: var(--shadow-md); }
+        .btn:active { transform: translateY(0) scale(0.975); box-shadow: var(--shadow-sm); }
+        .btn:disabled, .btn[disabled] { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
 
         .btn-primary {
             background: var(--primary-color);
@@ -231,8 +309,9 @@
         }
 
         .btn-secondary {
-            background: var(--secondary-color);
-            color: white;
+            background: color-mix(in srgb, var(--secondary-color) 88%, transparent);
+            color: #fff;
+            border-color: transparent;
         }
 
         .btn-secondary:hover {
@@ -257,12 +336,19 @@
 
         .form-input {
             width: 100%;
-            padding: 0.75rem;
+            padding: 0.7rem 0.85rem;
             border: 1px solid var(--border-light);
-            border-radius: 0.5rem;
+            border-radius: 0.65rem;
             background: var(--card-light);
             color: var(--text-light);
-            transition: all 0.2s ease;
+            font-size: 0.92rem;
+            transition: border-color 0.22s var(--ease), box-shadow 0.22s var(--ease), background 0.22s var(--ease);
+        }
+        .form-input:hover { border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-light)); }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3.5px var(--primary-soft);
         }
 
         body.dark .form-input {
@@ -291,19 +377,20 @@
         .credential-item {
             background: var(--card-light);
             border: 1px solid var(--border-light);
-            border-radius: 12px;
+            border-radius: var(--radius-md);
             padding: 1.25rem;
             display: flex;
             align-items: center;
             gap: 1rem;
-            transition: all 0.2s ease;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.28s var(--ease), border-color 0.28s var(--ease);
             position: relative;
+            backface-visibility: hidden;
         }
 
         .credential-item:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.08);
-            border-color: var(--primary-color);
+            transform: translateY(-2px);
+            border-color: color-mix(in srgb, var(--primary-color) 30%, var(--border-light));
         }
 
         body.dark .credential-item {
@@ -571,9 +658,6 @@
         /* 平滑过渡 */
         .credential-item,
         .stat-card,
-        .card {
-            transition: all 0.2s ease;
-        }
 
         /* 成功状态动画 */
         @keyframes successPulse {
@@ -731,33 +815,7 @@
                 padding: 0.75rem;
             }
 
-            .stat-card {
-                padding: 1rem;
-            }
-
-            .stat-value {
-                font-size: 1.5rem;
-            }
-
-            .credential-avatar {
-                width: 40px;
-                height: 40px;
-                font-size: 1rem;
-            }
-
-            .credential-meta {
-                flex-direction: column;
-                gap: 0.5rem;
-            }
-
-            .usage-table-container {
-                font-size: 0.9rem;
-            }
-
-            .usage-table th,
-            .usage-table td {
-                padding: 0.5rem;
-            }
+            .stat-card { padding: 1rem; }
         }
 
         /* 隐藏/显示元素 */
@@ -853,6 +911,31 @@
             color: var(--error-color);
             font-size: 0.9rem;
             margin-top: 0.5rem;
+        }
+
+        /* 登录页上的桌面配置入口，仅在 pywebview 桌面壳内显示 */
+        .login-desktop-link {
+            margin-top: 1.25rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--border-light);
+        }
+
+        body.dark .login-desktop-link {
+            border-top-color: var(--border-dark);
+        }
+
+        .login-desktop-link button {
+            background: none;
+            border: none;
+            color: var(--secondary-color);
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+        }
+
+        .login-desktop-link button:hover {
+            color: var(--primary-color);
+            text-decoration: underline;
         }
 
         /* OAuth2认证区域 */
@@ -956,10 +1039,12 @@
             background: var(--card-light);
             border: 1px solid var(--border-light);
             padding: 1.5rem;
-            border-radius: 1rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            transition: transform 0.32s var(--ease), border-color 0.32s var(--ease);
             position: relative;
             overflow: hidden;
+            backface-visibility: hidden;
         }
 
         body.dark .stat-card {
@@ -968,8 +1053,8 @@
         }
 
         .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(59, 130, 246, 0.15);
+            transform: translateY(-5px);
+            border-color: color-mix(in srgb, var(--primary-color) 24%, var(--border-light));
         }
 
         .stat-card-header {
@@ -1123,10 +1208,12 @@
         }
 
         .usage-table th, .usage-table td {
-            padding: 0.75rem 1rem;
+            padding: 0.8rem 1rem;
             text-align: left;
             border-bottom: 1px solid var(--border-light);
         }
+        .usage-table tbody tr { transition: background 0.2s var(--ease); }
+        .usage-table tbody tr:hover { background: var(--primary-soft); }
         
         body.dark .usage-table th, body.dark .usage-table td {
             border-bottom-color: var(--border-dark);
@@ -1167,6 +1254,171 @@
             margin-left: 0.5rem;
             font-weight: 600;
         }
+
+        /* ---- 工作台（多实例） ---- */
+        .card-actions { display: flex; gap: 0.5rem; }
+        .card-actions .btn { padding: 0.45rem 0.9rem; font-size: 0.85rem; }
+        .wb-hint {
+            color: var(--secondary-color); font-size: 0.85rem;
+            margin: 0.25rem 0 1rem; line-height: 1.6;
+        }
+        .wb-hint-sm {
+            display: block; color: var(--secondary-color);
+            font-size: 0.78rem; margin-top: 0.4rem; line-height: 1.5;
+        }
+        .wb-grid {
+            display: grid; gap: 0.9rem;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        }
+        .wb-card {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1.1rem;
+            background: var(--card-light);
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.28s var(--ease), border-color 0.28s var(--ease);
+            backface-visibility: hidden;
+        }
+        .wb-card:hover {
+            transform: translateY(-3px);
+            border-color: color-mix(in srgb, var(--primary-color) 26%, var(--border-light));
+        }
+        body.dark .wb-card { border-color: var(--border-dark); background: var(--card-dark); }
+        .wb-card-top {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 0.75rem;
+        }
+        .wb-name { font-weight: 650; font-size: 1rem; }
+        .wb-badge {
+            font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: 1rem;
+            font-weight: 600;
+        }
+        .wb-badge.on  { background: rgba(16,185,129,.15); color: #059669; }
+        .wb-badge.off { background: rgba(100,116,139,.15); color: #64748b; }
+        .wb-rows { font-size: 0.83rem; line-height: 1.9; color: var(--secondary-color); }
+        .wb-rows b { color: inherit; font-weight: 600; }
+        .wb-url {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.8rem; word-break: break-all;
+        }
+        .wb-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+        .wb-tag {
+            background: rgba(59,130,246,.12); color: #2563eb;
+            font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 0.25rem;
+        }
+        .wb-card-actions {
+            display: flex; gap: 0.5rem; margin-top: 0.9rem;
+            flex-wrap: wrap;
+        }
+        .wb-card-actions .btn { padding: 0.4rem 0.8rem; font-size: 0.82rem; }
+        .btn-danger { background: var(--error-color); color: #fff; }
+        .btn-danger:hover { opacity: 0.9; }
+
+        /* 弹窗 */
+        .wb-modal {
+            position: fixed; inset: 0; z-index: 400;
+            background: rgba(15,23,42,.55);
+            display: flex; align-items: center; justify-content: center;
+            padding: 1.5rem;
+        }
+        .wb-modal-box {
+            background: var(--card-light); border-radius: 0.75rem;
+            width: 100%; max-width: 560px; max-height: 88vh;
+            display: flex; flex-direction: column;
+            box-shadow: 0 24px 60px rgba(0,0,0,.35);
+        }
+        body.dark .wb-modal-box { background: var(--card-dark); }
+        .wb-modal-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--border-light);
+        }
+        body.dark .wb-modal-head { border-color: var(--border-dark); }
+        .wb-modal-head h3 { font-size: 1.05rem; }
+        .wb-close {
+            background: none; border: none; font-size: 1.5rem; line-height: 1;
+            cursor: pointer; color: var(--secondary-color);
+        }
+        .wb-modal-body { padding: 1.25rem; overflow-y: auto; }
+        .wb-modal-foot {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 1rem; padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border-light);
+        }
+        body.dark .wb-modal-foot { border-color: var(--border-dark); }
+        .wb-field { margin-bottom: 1rem; }
+        .wb-field label {
+            display: block; font-size: 0.85rem; font-weight: 600;
+            margin-bottom: 0.4rem;
+        }
+        .wb-field input[type=text], .wb-field input[type=number] {
+            width: 100%; padding: 0.6rem 0.7rem; font-size: 0.9rem;
+            border: 1px solid var(--border-light); border-radius: 0.4rem;
+            background: var(--background-light); color: inherit; font-family: inherit;
+        }
+        body.dark .wb-field input { border-color: var(--border-dark); background: var(--background-dark); }
+        .wb-radio-row { display: flex; gap: 1.25rem; }
+        .wb-radio { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; font-weight: 400; cursor: pointer; }
+        .wb-token-list { display: flex; flex-direction: column; gap: 0.45rem; }
+        .wb-token {
+            display: flex; align-items: flex-start; gap: 0.6rem;
+            padding: 0.6rem 0.7rem; border-radius: 0.4rem;
+            border: 1px solid var(--border-light); cursor: pointer;
+        }
+        body.dark .wb-token { border-color: var(--border-dark); }
+        .wb-token input { margin-top: 0.2rem; }
+        .wb-token-meta { font-size: 0.78rem; color: var(--secondary-color); line-height: 1.5; }
+        .wb-token-name { font-size: 0.87rem; font-weight: 600; }
+        .wb-error { color: var(--error-color); font-size: 0.83rem; }
+        .wb-empty { text-align: center; color: var(--secondary-color); padding: 2rem 1rem; }
+
+        /* API 测试：当前请求实际发往哪个服务地址 */
+        .test-target {
+            display: flex; align-items: center; gap: 0.6rem;
+            background: rgba(59,130,246,.1); border-left: 3px solid var(--primary-color);
+            border-radius: 0.35rem; padding: 0.6rem 0.8rem;
+            font-size: 0.85rem; margin-bottom: 1.25rem; line-height: 1.5;
+        }
+        .test-target .tt-url {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-weight: 600;
+        }
+        .test-target .tt-note { color: var(--secondary-color); }
+
+        .wb-orphan {
+            font-size: 0.78rem; color: #b45309; background: rgba(245,158,11,.12);
+            border-radius: 0.3rem; padding: 0.35rem 0.55rem; margin-top: 0.5rem;
+            line-height: 1.5;
+        }
+        .wb-warn {
+            font-size: 0.83rem; color: #b45309; background: rgba(245,158,11,.12);
+            border-left: 3px solid #f59e0b; border-radius: 0.35rem;
+            padding: 0.6rem 0.8rem; margin-top: 0.75rem; line-height: 1.5;
+        }
+        .wb-config {
+            margin-top: 1.1rem; padding-top: 1.1rem;
+            border-top: 1px solid var(--border-light);
+            display: grid; gap: 0.9rem;
+            /* 端口/密码较窄，API Key 需要更宽的行 */
+            grid-template-columns: minmax(150px, 0.8fr) minmax(200px, 1.4fr) minmax(170px, 1fr) minmax(340px, 2.4fr);
+        }
+        body.dark .wb-config { border-color: var(--border-dark); }
+        /* 窄窗口下退化为两列，再窄则单列 */
+        @media (max-width: 1280px) {
+            .wb-config { grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.4fr) minmax(170px, 1fr); }
+            #wbApiKeyField { grid-column: 1 / -1; }
+        }
+        @media (max-width: 900px) {
+            .wb-config { grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.4fr); }
+        }
+        @media (max-width: 700px) {
+            .wb-config { grid-template-columns: 1fr; }
+            #wbApiKeyField { grid-column: auto; }
+        }
+        .wb-config-actions {
+            display: flex; align-items: center; gap: 0.8rem;
+            grid-column: 1 / -1; flex-wrap: wrap;
+        }
+        .wb-config-actions .wb-hint-sm { margin-top: 0; }
     </style>
 </head>
 <body>
@@ -1200,23 +1452,14 @@
     <!-- 主仪表盘页面 -->
     <div id="dashboardPage" class="hidden">
         <!-- 顶部导航 -->
-        <header class="header">
-            <h1><i class="fas fa-robot"></i> CodeBuddy2API 管理面板</h1>
-            <div class="header-controls">
-                <button class="theme-toggle" onclick="toggleTheme()">
-                    <i class="fas fa-moon" id="themeIcon"></i>
-                </button>
-                <button class="btn btn-secondary" onclick="logout()" style="margin-left: 0.5rem;">
-                    <i class="fas fa-sign-out-alt"></i> 退出
-                </button>
-            </div>
-        </header>
-
         <!-- 主要内容 -->
         <main class="main-content">
             <!-- 导航标签 -->
             <div class="nav-tabs">
-                <button class="nav-tab active" onclick="showTab('dashboard')">
+                <button class="nav-tab active" onclick="showTab('workbench')">
+                    <i class="fas fa-layer-group"></i> 工作台
+                </button>
+                <button class="nav-tab" onclick="showTab('dashboard')">
                     <i class="fas fa-tachometer-alt"></i> 仪表板
                 </button>
                 <button class="nav-tab" onclick="showTab('credentials')">
@@ -1228,10 +1471,17 @@
                 <button class="nav-tab" onclick="showTab('settings')">
                     <i class="fas fa-cog"></i> 设置
                 </button>
+                <div class="nav-spacer"></div>
+                <button class="nav-icon-btn" onclick="toggleTheme()" title="切换主题">
+                    <i class="fas fa-moon" id="themeIcon"></i>
+                </button>
+                <button class="nav-icon-btn" onclick="logout()" title="退出登录">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
             </div>
 
             <!-- 仪表板面板 -->
-            <div id="dashboard" class="tab-panel active">
+            <div id="dashboard" class="tab-panel">
                 <div class="stats-grid">
                     <!-- 凭证统计卡片 -->
                     <div class="stat-card">
@@ -1390,7 +1640,7 @@
                             <div class="auth-progress">
                                 <i class="fas fa-clock"></i>
                                 <div>等待认证完成...</div>
-                                <small style="color: var(--secondary-color);">完成登录后系统将自动获取凭证</small>
+                                <small id="authWaitHint" style="color: var(--secondary-color);">完成登录后系统将自动保存凭证</small>
                             </div>
                             <div style="text-align: center; margin-top: 1rem;">
                                 <button class="btn btn-secondary" onclick="waitForAutoCallback()">
@@ -1447,6 +1697,10 @@
                             <button id="rotationToggleBtn" class="btn btn-secondary" onclick="toggleAutoRotation()" style="margin-right: 0.5rem;">
                                 <i class="fas fa-ban"></i> 恢复自动轮换
                             </button>
+                            <button id="silentRefreshBtn" class="btn btn-secondary" onclick="silentRefreshAll()" style="margin-right: 0.5rem;"
+                                    title="用 refresh_token 静默换新，无需重新登录">
+                                <i class="fas fa-key"></i> 静默续期
+                            </button>
                             <button class="btn btn-primary" onclick="loadCredentials()">
                                 <i class="fas fa-sync-alt"></i> 刷新列表
                             </button>
@@ -1474,12 +1728,14 @@
                     <div class="card-header">
                         <h3 class="card-title">聊天完成测试</h3>
                     </div>
+                    <div class="test-target" id="testTarget">
+                        <i class="fas fa-server"></i>
+                        <span>正在识别当前接口...</span>
+                    </div>
                     <div class="form-group">
                         <label class="form-label" for="testModel">模型</label>
                         <select id="testModel" class="form-input">
-                            <option value="auto-chat">auto-chat</option>
-                            <option value="claude-4.0">claude-4.0</option>
-                            <option value="gpt-5">gpt-5</option>
+                            <option value="">加载模型中...</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1517,7 +1773,7 @@
       -H "Authorization: Bearer YOUR_PASSWORD" \
       -H "Content-Type: application/json" \
       -d '{
-        "model": "auto-chat",
+        "model": "deepseek-v3",
         "messages": [
           {"role": "user", "content": "Hello!"}
         ]
@@ -1532,7 +1788,7 @@
     )
 
     response = client.chat.completions.create(
-        model="auto-chat",
+        model="deepseek-v3",
         messages=[
             {"role": "user", "content": "Hello!"}
         ]
@@ -1543,6 +1799,152 @@
             </div>
 
             <!-- 设置面板 -->
+            <!-- 工作台面板：多实例管理 -->
+            <div id="workbench" class="tab-panel active">
+                <!-- 主应用自身的控制，与下方实例无关 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">主应用</h3>
+                        <div class="card-actions">
+                            <button class="btn btn-secondary" id="wbRestartBtn" onclick="restartMainApp()">
+                                <i class="fas fa-power-off"></i> 重启主应用
+                            </button>
+                            <button class="btn btn-secondary" id="wbUpdateBtn" onclick="checkUpdateFromWorkbench()">
+                                <i class="fas fa-cloud-download-alt"></i> 检查更新
+                            </button>
+                        </div>
+                    </div>
+                    <div class="wb-rows">
+                        <div><b>当前版本：</b><span id="wbVersion">读取中…</span></div>
+                        <div><b>服务地址：</b><span class="wb-url" id="wbMainUrl"></span></div>
+                    </div>
+                    <div id="wbNotConfigured" class="wb-warn hidden">
+                        主应用尚未完成配置，请先填写访问密码（API Key 模式下还需填写 API Key）。
+                    </div>
+                    <div class="status" id="wbUpdateStatus"></div>
+
+                    <div class="wb-config" id="wbConfigBox">
+                        <div class="wb-field">
+                            <label for="wbPort">服务端口</label>
+                            <input type="number" id="wbPort" min="1" max="65535" placeholder="8002">
+                        </div>
+                        <div class="wb-field">
+                            <label for="wbPassword">访问密码</label>
+                            <input type="text" id="wbPassword" placeholder="客户端连接与登录管理面板使用">
+                        </div>
+                        <div class="wb-field" id="wbAuthField">
+                            <label>启动模式</label>
+                            <div class="wb-radio-row">
+                                <label class="wb-radio">
+                                    <input type="radio" name="wbAuth" value="api_key"
+                                           onchange="onMainAuthChange()"> API Key
+                                </label>
+                                <label class="wb-radio">
+                                    <input type="radio" name="wbAuth" value="token"
+                                           onchange="onMainAuthChange()"> Token 轮换
+                                </label>
+                            </div>
+                            <small class="wb-hint-sm" id="wbAuthCount"></small>
+                        </div>
+                        <div class="wb-field" id="wbApiKeyField">
+                            <label for="wbApiKey">CodeBuddy API Key</label>
+                            <input type="text" id="wbApiKey" placeholder="ck_...">
+                            <small class="wb-hint-sm" id="wbAuthModeHint"></small>
+                        </div>
+                        <div class="wb-config-actions">
+                            <button class="btn btn-primary" id="wbSaveBtn" onclick="saveMainAppConfig()">
+                                <i class="fas fa-save"></i> 保存并应用
+                            </button>
+                            <small class="wb-hint-sm" id="wbSaveHint"></small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">多开实例</h3>
+                        <div class="card-actions">
+                            <button class="btn btn-secondary" onclick="loadInstances()">
+                                <i class="fas fa-sync"></i> 刷新
+                            </button>
+                            <button class="btn btn-primary" onclick="openInstanceForm()">
+                                <i class="fas fa-plus"></i> 新建实例
+                            </button>
+                        </div>
+                    </div>
+                    <p class="wb-hint">
+                        每个实例是独立进程，拥有自己的端口、访问密码和认证方式，可同时运行互不影响。
+                        客户端连接时使用对应实例的端口与密码。
+                    </p>
+                    <div id="instanceList">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <div>加载实例中...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 实例编辑弹窗 -->
+            <div id="instanceModal" class="wb-modal hidden">
+                <div class="wb-modal-box">
+                    <div class="wb-modal-head">
+                        <h3 id="instanceModalTitle">新建实例</h3>
+                        <button class="wb-close" onclick="closeInstanceForm()">&times;</button>
+                    </div>
+                    <div class="wb-modal-body">
+                        <div class="wb-field">
+                            <label>实例名称</label>
+                            <input type="text" id="instName" placeholder="例如：Key实例 / Token实例">
+                        </div>
+                        <div class="wb-field">
+                            <label>端口</label>
+                            <input type="number" id="instPort" min="1" max="65535" placeholder="留空自动分配">
+                        </div>
+                        <div class="wb-field">
+                            <label>访问密码</label>
+                            <input type="text" id="instPassword" placeholder="客户端连接时使用的 Bearer Token">
+                        </div>
+                        <div class="wb-field">
+                            <label>认证方式</label>
+                            <div class="wb-radio-row">
+                                <label class="wb-radio">
+                                    <input type="radio" name="instAuth" value="api_key" checked
+                                           onchange="onAuthModeChange()"> API Key
+                                </label>
+                                <label class="wb-radio">
+                                    <input type="radio" name="instAuth" value="token"
+                                           onchange="onAuthModeChange()"> Token 轮换
+                                </label>
+                            </div>
+                        </div>
+                        <div class="wb-field" id="apiKeyField">
+                            <label>CodeBuddy API Key</label>
+                            <input type="text" id="instApiKey" placeholder="ck_...">
+                        </div>
+                        <div class="wb-field hidden" id="tokenField">
+                            <label>选择凭证（可多选）</label>
+                            <div id="tokenList" class="wb-token-list">
+                                <div class="loading"><i class="fas fa-spinner fa-spin"></i> 加载凭证中...</div>
+                            </div>
+                            <small class="wb-hint-sm">
+                                选中的凭证会被复制到该实例的独立目录，未选中的不会被该实例使用。
+                            </small>
+                            <small class="wb-hint-sm">
+                                轮换：每处理 1 次请求后切换到下一个凭证（多个凭证时自动生效）。
+                            </small>
+                        </div>
+                    </div>
+                    <div class="wb-modal-foot">
+                        <span id="instanceFormError" class="wb-error"></span>
+                        <div>
+                            <button class="btn btn-secondary" onclick="closeInstanceForm()">取消</button>
+                            <button class="btn btn-primary" id="instanceSaveBtn" onclick="saveInstance()">保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="settings" class="tab-panel">
                 <div class="card">
                     <div class="card-header">
@@ -1580,26 +1982,29 @@
         let isAuthenticated = false;
         let credentialsCache = []; // 用于缓存凭证和其状态
 
+        // 本地默认密码：桌面/本地部署下直接进入管理面板，不再要求输入。
+        const DEFAULT_SERVICE_PASSWORD = 'cb_local_pwd';
+
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
             initializeTheme();
-            showTab('dashboard');
-            
+
             // 设置服务启动时间
             if (!sessionStorage.getItem('serviceStartTime')) {
                 sessionStorage.setItem('serviceStartTime', Date.now().toString());
             }
             
-            // 检查是否已经登录
+            // 直接进入管理面板：优先沿用会话中已保存的密码，否则用本地默认密码。
             const savedPassword = sessionStorage.getItem('servicePassword');
-            if (savedPassword) {
-                servicePassword = savedPassword;
-                isAuthenticated = true;
-                showDashboardPage();
-                loadDashboard();
-            } else {
-                showLoginPage();
-            }
+            servicePassword = savedPassword || DEFAULT_SERVICE_PASSWORD;
+            isAuthenticated = true;
+            sessionStorage.setItem('servicePassword', servicePassword);
+
+            // showTab 会立即触发 loadInstances() 等带鉴权的请求，
+            // 所以必须放在 servicePassword 赋值之后，否则会 401。
+            showTab('workbench');
+            showDashboardPage();
+            loadDashboard();
 
             // 添加键盘快捷键支持
             document.addEventListener('keydown', handleKeyboardShortcuts);
@@ -1753,8 +2158,13 @@
             // 显示目标面板
             document.getElementById(tabId).classList.add('active');
             
-            // 激活对应标签
-            event.target.classList.add('active');
+            // 激活对应标签（不依赖全局 event，以便非点击场景调用）
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                const handler = tab.getAttribute('onclick') || '';
+                if (handler.includes(`showTab('${tabId}')`)) {
+                    tab.classList.add('active');
+                }
+            });
             
             // 加载对应数据
             if (tabId === 'dashboard') {
@@ -1763,6 +2173,10 @@
                 loadCredentials();
             } else if (tabId === 'settings') {
                 loadSettings();
+            } else if (tabId === 'workbench') {
+                loadInstances();
+            } else if (tabId === 'api-test') {
+                loadTestModels();
             }
         }
 
@@ -1791,13 +2205,7 @@
             notification.classList.remove('show');
         }
 
-        // 登录与页面切换
-        function showLoginPage() {
-            document.getElementById('loginPage').classList.remove('hidden');
-            document.getElementById('dashboardPage').classList.add('hidden');
-            document.getElementById('loginPassword').focus();
-        }
-
+        // 页面切换
         function showDashboardPage() {
             document.getElementById('loginPage').classList.add('hidden');
             document.getElementById('dashboardPage').classList.remove('hidden');
@@ -1849,11 +2257,9 @@
         }
         
         function logout() {
-            servicePassword = '';
-            isAuthenticated = false;
+            // 不再要求输入密码，重新加载即可回到面板。
             sessionStorage.removeItem('servicePassword');
-            showLoginPage();
-            showNotification('已退出登录', 'info');
+            window.location.reload();
         }
 
         // 获取认证头
@@ -1919,8 +2325,12 @@
                 }
             } catch (error) {
                 console.error('Failed to load credentials count:', error);
-                document.getElementById('totalCredentials').textContent = '错误';
-                document.getElementById('validCredentials').textContent = '0';
+                // 保留上次成功获取的值，避免与未被重置的圆环/趋势文案自相矛盾。
+                // 仅在从未成功加载过时才显示错误态。
+                const totalEl = document.getElementById('totalCredentials');
+                if (totalEl.textContent === '-' || totalEl.textContent === '') {
+                    totalEl.textContent = '错误';
+                }
             }
 
             // 设置API端点
@@ -2178,7 +2588,11 @@
                 let currentSelectedIndex = -1;
                 try {
                     const currentStatus = window.lastCredentialStatus || {};
-                    currentSelectedIndex = currentStatus.index || -1;
+                    // 注意：不能用 `|| -1`，凭证 #1 的索引是 0，
+                    // `0 || -1` 会得到 -1，导致第一个凭证永远显示不出选中态。
+                    currentSelectedIndex = Number.isInteger(currentStatus.index)
+                        ? currentStatus.index
+                        : -1;
                     
                     // 如果没有缓存状态，重新获取
                     if (currentSelectedIndex === -1 && !window.lastCredentialStatus) {
@@ -2556,12 +2970,91 @@
         }
 
         // API测试功能
+        // 测试请求走的是相对路径，所以永远发往「当前打开的这个实例」。
+        // 多开时页面上必须写清楚这一点，否则无法判断测的是哪个端口。
+        async function renderTestTarget() {
+            const box = document.getElementById('testTarget');
+            if (!box) return;
+
+            // 实例列表可能还没加载过；取一次以便把端口反查成实例名。
+            if (!instancesCache.length) {
+                try {
+                    const data = await apiFetch('/instances');
+                    instancesCache = data.instances || [];
+                } catch (e) {
+                    // 拉不到就退化为只显示地址，不影响测试本身
+                }
+            }
+
+            const base = `${window.location.protocol}//${window.location.host}`;
+            const port = Number(window.location.port);
+
+            // 通过实例列表反查当前端口对应哪个实例
+            const match = (instancesCache || []).find(inst => inst.port === port);
+
+            let label, note;
+            if (match) {
+                label = escapeHtml(match.name);
+                note = match.auth_mode === 'token'
+                    ? `Token 轮换（${(match.token_names || []).length} 个凭证）`
+                    : 'API Key';
+            } else {
+                label = '主应用';
+                note = '按页面所在地址发送';
+            }
+
+            box.innerHTML =
+                `<i class="fas fa-server"></i>
+                 <span>测试目标：<span class="tt-url">${escapeHtml(base)}</span>
+                 <span class="tt-note">· ${label} · ${note} · 需用该实例的访问密码</span></span>`;
+        }
+
+        // 从服务端拉取真实模型列表填充下拉框。
+        // 模型列表随账号/上游变化，写死在页面里的选项会失效（例如 auto-chat）。
+        async function loadTestModels() {
+            const select = document.getElementById('testModel');
+            if (!select) return;
+
+            await renderTestTarget();
+
+            const previous = select.value;
+            try {
+                const response = await fetch('/codebuddy/v1/models', { headers: getAuthHeaders() });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json();
+                const models = (payload.data || [])
+                    .map(m => m && m.id)
+                    .filter(Boolean);
+
+                if (!models.length) {
+                    select.innerHTML = '<option value="">未获取到模型</option>';
+                    return;
+                }
+
+                select.innerHTML = models
+                    .map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`)
+                    .join('');
+
+                // 尽量保留用户原来的选择，否则回到第一项
+                if (models.includes(previous)) {
+                    select.value = previous;
+                }
+            } catch (error) {
+                select.innerHTML = '<option value="">模型加载失败</option>';
+                console.warn('加载模型列表失败:', error);
+            }
+        }
+
         async function testAPI() {
             const model = document.getElementById('testModel').value;
             const message = document.getElementById('testMessage').value;
             const stream = document.getElementById('testStream').checked;
             const resultDiv = document.getElementById('testResult');
 
+            if (!model) {
+                showNotification('请先选择模型', 'error');
+                return;
+            }
             if (!message.trim()) {
                 showNotification('请输入测试消息', 'error');
                 return;
@@ -2658,9 +3151,11 @@
                     section.classList.remove('hidden');
                     section.style.display = 'block';
                     
-                    showNotification('✅ 认证链接已生成，请点击链接完成登录', 'success');
-                    
-                    // 立即开始轮询
+                    // 自动拉起系统默认浏览器，省去手动点「打开链接」
+                    openAuthUrl({ silent: true });
+                    showNotification('🌐 已自动打开登录页面，请完成登录', 'success');
+
+                    // 立即开始轮询（后台自动等待并落库）
                     pollForToken();
                 } else {
                     let errorMessage = data.message || '获取认证链接失败';
@@ -2679,17 +3174,97 @@
             btn.innerHTML = '<i class="fas fa-play"></i> 开始认证';
         }
 
-        function copyAuthUrl() {
-            const input = document.getElementById('authUrlInput');
-            input.select();
-            document.execCommand('copy');
-            showNotification('认证链接已复制到剪贴板', 'success');
+        async function silentRefreshAll() {
+            const btn = document.getElementById('silentRefreshBtn');
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 续期中...';
+            try {
+                const response = await fetch('/codebuddy/auth/refresh-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (sessionStorage.getItem('servicePassword') || '')
+                    },
+                    body: JSON.stringify({ force: false })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    // 区分「无需续期」和「无法续期」：老凭证没存 refresh_token，
+                    // 只能靠重新登录拿到续期能力，必须明确告知而不是静默跳过。
+                    const noRt = (data.results || []).filter(r => r.no_refresh_token);
+                    if (data.refreshed > 0) {
+                        showNotification(`✅ 已静默续期 ${data.refreshed} / ${data.total} 个凭证`, 'success');
+                        loadCredentials();
+                    } else if (noRt.length) {
+                        showNotification(
+                            `⚠️ ${noRt.length} 个凭证没有 refresh_token，无法自动续期。请对这些账号重新登录一次以启用静默续期。`,
+                            'warning');
+                    } else {
+                        showNotification(`所有凭证均在有效期内，无需续期（共 ${data.total} 个）`, 'info');
+                    }
+                } else {
+                    showNotification('❌ ' + (data.message || '续期失败'), 'error');
+                }
+            } catch (e) {
+                showNotification('❌ 网络错误: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
         }
 
-        function openAuthUrl() {
+        async function copyAuthUrl() {
+            const input = document.getElementById('authUrlInput');
+            const url = input.value;
+            if (!url) { showNotification('认证链接尚未生成', 'error'); return; }
+
+            // navigator.clipboard 在非安全上下文/WebView 里可能不可用，
+            // 失败时退回选中文本，让用户手动复制。
+            try {
+                if (navigator.clipboard && window.isSecureContext !== false) {
+                    await navigator.clipboard.writeText(url);
+                    showNotification('认证链接已复制到剪贴板', 'success');
+                    return;
+                }
+                throw new Error('clipboard unavailable');
+            } catch (e) {
+                input.select();
+                input.setSelectionRange(0, url.length);
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+                showNotification(
+                    ok ? '认证链接已复制到剪贴板' : '已选中链接，请按 ⌘C 复制',
+                    ok ? 'success' : 'warning'
+                );
+            }
+        }
+
+        async function openAuthUrl(opts) {
+            const silent = !!(opts && opts.silent);
             const url = document.getElementById('authUrlInput').value;
-            window.open(url, '_blank');
-            showNotification('已在新窗口打开认证页面，请完成登录', 'info');
+            if (!url) { if (!silent) showNotification('认证链接尚未生成', 'error'); return; }
+
+            // 桌面壳里 window.open 不会打开浏览器（WebView 没有标签页体系），
+            // 必须走桥的 open_url 交给系统默认浏览器。
+            const bridge = window.pywebview && window.pywebview.api;
+            if (bridge && bridge.open_url) {
+                try {
+                    const res = await bridge.open_url(url);
+                    if (!(res && res.ok) && !silent) {
+                        showNotification((res && res.message) || '无法打开浏览器', 'error');
+                    }
+                    return;
+                } catch (e) {
+                    if (!silent) showNotification('无法打开浏览器：' + e.message, 'error');
+                    return;
+                }
+            }
+
+            const win = window.open(url, '_blank');
+            if (!win && !silent) {
+                showNotification('浏览器拦截了新窗口，请手动复制链接打开', 'warning');
+            }
         }
 
         function showManualCallback() {
@@ -2733,10 +3308,13 @@
             }
         }
 
+        let authWaitSeconds = 0;
+
         function pollForToken() {
             if (!currentAuthData) return;
-            
+
             stopPolling(); // 清除之前的轮询
+            authWaitSeconds = 0;
             
             const poll = async () => {
                 try {
@@ -2768,8 +3346,14 @@
                         currentAuthData = null;
                         
                     } else if (data.error === 'authorization_pending') {
-                        // 继续等待用户授权
-                        console.log('等待用户授权...');
+                        // 继续等待用户授权：在界面上显示已等待时长
+                        authWaitSeconds += 5;
+                        const el = document.getElementById('authWaitHint');
+                        if (el) {
+                            const m = Math.floor(authWaitSeconds / 60);
+                            const sec = authWaitSeconds % 60;
+                            el.textContent = `已在后台等待 ${m > 0 ? m + ' 分 ' : ''}${sec} 秒，完成登录后会自动保存`;
+                        }
                     } else if (data.error === 'slow_down') {
                         // 减慢轮询频率
                         console.log('减慢轮询频率');
@@ -2963,6 +3547,476 @@
         window.addEventListener('beforeunload', () => {
             stopPolling();
         });
+
+        // ==================== 工作台：多实例管理 ====================
+        let instancesCache = [];
+        let editingInstanceId = null;
+        let credentialPool = [];
+
+        async function apiFetch(path, options = {}) {
+            const res = await fetch('/api' + path, {
+                ...options,
+                headers: {
+                    'Authorization': `Bearer ${servicePassword}`,
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {})
+                }
+            });
+            let body = null;
+            try { body = await res.json(); } catch (e) { body = null; }
+            if (!res.ok) {
+                throw new Error((body && (body.detail || body.message)) || `请求失败 (${res.status})`);
+            }
+            return body;
+        }
+
+        async function loadInstances() {
+            const box = document.getElementById('instanceList');
+            if (!box) return;
+            loadMainAppInfo();
+            try {
+                const data = await apiFetch('/instances');
+                instancesCache = data.instances || [];
+                renderInstances();
+            } catch (e) {
+                box.innerHTML = `<div class="wb-empty">加载失败：${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        // pywebview 注入 api 对象的时间不确定：页面首次渲染时常常还没有。
+        // 等它就绪再渲染桌面专属控件，否则会永久隐藏掉本该显示的部分。
+        function waitForBridge(timeoutMs = 10000) {
+            return new Promise((resolve) => {
+                if (window.pywebview && window.pywebview.api) { resolve(true); return; }
+                let waited = 0;
+                const timer = setInterval(() => {
+                    if (window.pywebview && window.pywebview.api) {
+                        clearInterval(timer); resolve(true);
+                    } else if ((waited += 100) >= timeoutMs) {
+                        clearInterval(timer); resolve(false);
+                    }
+                }, 100);
+                window.addEventListener('pywebviewready', () => {
+                    clearInterval(timer); resolve(true);
+                }, { once: true });
+            });
+        }
+
+        // ---- 主应用控制（配置 / 重启 / 检查更新）----
+        // 这些只对「桌面壳内的主应用」有效，与多开实例无关，所以单独一组。
+
+        async function loadMainAppInfo() {
+            const el = document.getElementById('wbVersion');
+            const urlEl = document.getElementById('wbMainUrl');
+            if (urlEl) urlEl.textContent = window.location.origin;
+
+            // 版本/配置走桌面壳的桥；浏览器里打开时没有桥。
+            const bridge = window.pywebview && window.pywebview.api;
+            const restartBtn = document.getElementById('wbRestartBtn');
+            const updateBtn = document.getElementById('wbUpdateBtn');
+            const configBox = document.getElementById('wbConfigBox');
+
+            if (!bridge) {
+                // The bridge may not be injected yet on first paint, so hide
+                // nothing permanently — just wait for it and try again.
+                if (el) el.textContent = '正在连接桌面功能…';
+                waitForBridge().then((ready) => { if (ready) loadMainAppInfo(); });
+                return;
+            }
+
+            // Bridge is present: desktop-only controls are usable.
+            if (restartBtn) restartBtn.style.display = '';
+            if (updateBtn) updateBtn.style.display = '';
+            if (configBox) configBox.style.display = '';
+
+            try {
+                const cfg = await bridge.get_config();
+                const ver = await bridge.get_version();
+                const parts = [];
+                if (ver.version) parts.push('v' + ver.version);
+                if (ver.commit_short) parts.push(ver.commit_short);
+                if (ver.build_date) parts.push(ver.build_date);
+                if (el) el.textContent = parts.join(' · ') || '未知';
+
+                const portEl = document.getElementById('wbPort');
+                if (portEl && document.activeElement !== portEl) portEl.value = cfg.port || '';
+                const pwEl = document.getElementById('wbPassword');
+                if (pwEl && document.activeElement !== pwEl) pwEl.value = cfg.password || '';
+                const keyEl = document.getElementById('wbApiKey');
+                if (keyEl && document.activeElement !== keyEl) keyEl.value = cfg.api_key || '';
+
+                // 启动模式
+                const mode = cfg.auth_mode === 'token' ? 'token' : 'api_key';
+                document.querySelectorAll('input[name="wbAuth"]').forEach(r => {
+                    r.checked = (r.value === mode);
+                });
+                onMainAuthChange();
+
+                // 配置不完整时提示，但不阻塞面板使用。
+                const warn = document.getElementById('wbNotConfigured');
+                if (warn) warn.classList.toggle('hidden', !!cfg.configured);
+            } catch (e) {
+                // 桥刚注入时方法可能还没挂好，稍后重试一次再报错。
+                if (!loadMainAppInfo._retried) {
+                    loadMainAppInfo._retried = true;
+                    if (el) el.textContent = '正在读取…';
+                    setTimeout(loadMainAppInfo, 600);
+                    return;
+                }
+                if (el) el.textContent = '读取失败';
+            }
+            loadMainAppInfo._retried = false;
+        }
+
+        async function saveMainAppConfig() {
+            const bridge = window.pywebview && window.pywebview.api;
+            if (!bridge) { showNotification('仅桌面应用内可用', 'error'); return; }
+
+            const portRaw = document.getElementById('wbPort').value.trim();
+            const password = document.getElementById('wbPassword').value;
+            const apiKey = document.getElementById('wbApiKey').value.trim();
+            const note = document.getElementById('wbSaveHint');
+
+            const port = Number(portRaw);
+            if (!portRaw || !Number.isInteger(port) || port < 1 || port > 65535) {
+                note.textContent = '端口必须是 1 - 65535 之间的整数。';
+                return;
+            }
+            if (!password) {
+                note.textContent = '访问密码不能为空。';
+                return;
+            }
+            const authMode = document.querySelector('input[name="wbAuth"]:checked').value;
+            if (authMode === 'api_key' && !apiKey) {
+                note.textContent = 'API Key 模式下必须填写 API Key。';
+                return;
+            }
+
+            const btn = document.getElementById('wbSaveBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
+            note.textContent = '';
+
+            try {
+                const res = await bridge.save_config(port, apiKey, password, authMode);
+                if (res && res.ok) {
+                    note.textContent = res.message || '已保存。';
+                    showNotification('主应用配置已保存', 'success');
+                    // 端口变更会重启服务，等确认后再跳转，否则页面会失效。
+                    if (res.restarted && res.url) {
+                        const target = res.url;
+                        setTimeout(() => {
+                            if (window.location.origin !== target) window.location.href = target + '/';
+                            else window.location.reload();
+                        }, 1200);
+                        return;
+                    }
+                    await loadMainAppInfo();
+                } else {
+                    note.textContent = (res && res.message) || '保存失败。';
+                    showNotification('保存失败', 'error');
+                }
+            } catch (e) {
+                note.textContent = '保存失败：' + e.message;
+                showNotification('保存失败', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save"></i> 保存并应用';
+            }
+        }
+
+        async function restartMainApp() {
+            const bridge = window.pywebview && window.pywebview.api;
+            if (!bridge) { showNotification('仅桌面应用内可用', 'error'); return; }
+
+            const running = (instancesCache || []).filter(i => i.running).length;
+            const extra = running
+                ? `\n\n注意：${running} 个正在运行的实例会继续运行，重启后可在列表中看到。`
+                : '';
+            if (!confirm('确定重启主应用？管理面板会短暂断开。' + extra)) return;
+
+            const btn = document.getElementById('wbRestartBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 重启中...';
+            try {
+                const res = await bridge.restart_server();
+                if (res && res.ok) {
+                    showNotification('主应用已重启', 'success');
+                    // 等服务重新监听后再刷新，否则页面会直接打不开。
+                    setTimeout(() => { window.location.href = (res.url || window.location.origin) + '/'; }, 1200);
+                } else {
+                    showNotification((res && res.message) || '重启失败', 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-power-off"></i> 重启主应用';
+                }
+            } catch (e) {
+                showNotification('重启失败：' + e.message, 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-power-off"></i> 重启主应用';
+            }
+        }
+
+        async function checkUpdateFromWorkbench() {
+            const bridge = window.pywebview && window.pywebview.api;
+            if (!bridge) { showNotification('仅桌面应用内可用', 'error'); return; }
+
+            const btn = document.getElementById('wbUpdateBtn');
+            const box = document.getElementById('wbUpdateStatus');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 检查中...';
+            box.className = 'status show info';
+            box.textContent = '正在连接 GitHub…';
+
+            try {
+                const r = await bridge.check_update();
+                const map = { latest: 'ok', ahead: 'ok', outdated: 'info', unknown: 'info', error: 'err' };
+                box.className = 'status show ' + (map[r.status] || 'info');
+                box.textContent = r.message || '检查完成。';
+                if (r.status === 'outdated' && r.compare_url) {
+                    const link = document.createElement('a');
+                    link.href = '#';
+                    link.textContent = ' 查看更新内容 →';
+                    link.style.color = 'inherit';
+                    link.style.textDecoration = 'underline';
+                    link.onclick = (ev) => { ev.preventDefault(); bridge.open_url(r.compare_url); };
+                    box.appendChild(link);
+                }
+            } catch (e) {
+                box.className = 'status show err';
+                box.textContent = '检查更新失败：' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> 检查更新';
+            }
+        }
+
+        function renderInstances() {
+            const box = document.getElementById('instanceList');
+            if (!instancesCache.length) {
+                box.innerHTML = `<div class="wb-empty">
+                    还没有实例。点击右上角「新建实例」创建第一个。
+                </div>`;
+                return;
+            }
+            box.innerHTML = `<div class="wb-grid">` + instancesCache.map(inst => {
+                const modeLabel = inst.auth_mode === 'token'
+                    ? `Token 轮换（${(inst.token_names || []).length} 个凭证）`
+                    : 'API Key';
+                const tags = inst.auth_mode === 'token' && (inst.token_names || []).length
+                    ? `<div class="wb-tags">${inst.token_names.map(n =>
+                         `<span class="wb-tag">${escapeHtml(n.replace(/^codebuddy_token_|\.json$/g, ''))}</span>`
+                       ).join('')}</div>`
+                    : '';
+                return `
+                <div class="wb-card">
+                    <div class="wb-card-top">
+                        <span class="wb-name">${escapeHtml(inst.name)}</span>
+                        <span class="wb-badge ${inst.running ? 'on' : 'off'}">
+                            ${inst.running ? (inst.healthy ? '运行中' : '启动中') : '已停止'}
+                        </span>
+                    </div>
+                    ${inst.running && inst.managed === false
+                        ? `<div class="wb-orphan">该实例在应用重启前启动，仍在此端口运行。</div>`
+                        : ''}
+                    <div class="wb-rows">
+                        <div><b>地址：</b><span class="wb-url">${escapeHtml(inst.url)}</span></div>
+                        <div><b>密码：</b>${escapeHtml(inst.password)}</div>
+                        <div><b>认证：</b>${escapeHtml(modeLabel)}</div>
+                        ${tags}
+                    </div>
+                    <div class="wb-card-actions">
+                        ${inst.running
+                            ? `<button class="btn btn-secondary" onclick="instanceAction('${inst.id}','stop')">
+                                   <i class="fas fa-stop"></i> 停止</button>`
+                            : `<button class="btn btn-primary" onclick="instanceAction('${inst.id}','start')">
+                                   <i class="fas fa-play"></i> 启动</button>`}
+                        <button class="btn btn-secondary" onclick="openInstanceForm('${inst.id}')">
+                            <i class="fas fa-edit"></i> 编辑</button>
+                        <button class="btn btn-secondary" onclick="copyInstanceInfo('${inst.id}')">
+                            <i class="fas fa-copy"></i> 复制连接信息</button>
+                        <button class="btn btn-danger" onclick="deleteInstance('${inst.id}')">
+                            <i class="fas fa-trash"></i> 删除</button>
+                    </div>
+                </div>`;
+            }).join('') + `</div>`;
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[c]);
+        }
+
+        async function instanceAction(id, action) {
+            showNotification(action === 'start' ? '正在启动实例...' : '正在停止实例...', 'info');
+            try {
+                const r = await apiFetch(`/instances/${id}/${action}`, { method: 'POST' });
+                showNotification(r.message || '操作完成', 'success');
+            } catch (e) {
+                showNotification(e.message, 'error');
+            }
+            await loadInstances();
+        }
+
+        async function deleteInstance(id) {
+            const inst = instancesCache.find(i => i.id === id);
+            if (!confirm(`确定删除实例 “${inst ? inst.name : id}”？此操作不可撤销。`)) return;
+            try {
+                await apiFetch(`/instances/${id}`, { method: 'DELETE' });
+                showNotification('实例已删除', 'success');
+            } catch (e) {
+                showNotification(e.message, 'error');
+            }
+            await loadInstances();
+        }
+
+        function copyInstanceInfo(id) {
+            const inst = instancesCache.find(i => i.id === id);
+            if (!inst) return;
+            const base = inst.url + '/v1';
+            const text = [
+                `实例：${inst.name}`,
+                `Base URL：${base}`,
+                `API Key（Bearer Token）：${inst.password}`,
+                `认证方式：${inst.auth_mode === 'token' ? 'Token 轮换' : 'API Key'}`,
+            ].join('\n');
+            navigator.clipboard.writeText(text)
+                .then(() => showNotification('连接信息已复制', 'success'))
+                .catch(() => showNotification('复制失败，请手动复制', 'error'));
+        }
+
+        async function openInstanceForm(id) {
+            editingInstanceId = id || null;
+            const inst = id ? instancesCache.find(i => i.id === id) : null;
+            document.getElementById('instanceModalTitle').textContent =
+                inst ? `编辑实例：${inst.name}` : '新建实例';
+            document.getElementById('instanceFormError').textContent = '';
+            document.getElementById('instName').value = inst ? inst.name : '';
+            document.getElementById('instPort').value = inst ? inst.port : '';
+            document.getElementById('instPassword').value = inst ? inst.password : '';
+            document.getElementById('instApiKey').value = inst ? (inst.api_key || '') : '';
+
+            const mode = inst ? inst.auth_mode : 'api_key';
+            document.querySelectorAll('input[name="instAuth"]').forEach(r => {
+                r.checked = (r.value === mode);
+            });
+
+            document.getElementById('instanceModal').classList.remove('hidden');
+            await loadCredentialPool(inst ? (inst.token_names || []) : []);
+            onAuthModeChange();
+        }
+
+        function closeInstanceForm() {
+            document.getElementById('instanceModal').classList.add('hidden');
+            editingInstanceId = null;
+        }
+
+        function onAuthModeChange() {
+            const mode = document.querySelector('input[name="instAuth"]:checked').value;
+            document.getElementById('apiKeyField').classList.toggle('hidden', mode !== 'api_key');
+            document.getElementById('tokenField').classList.toggle('hidden', mode !== 'token');
+        }
+
+        // 主应用启动模式：api_key 手填 Key，token 走凭证池轮换
+        function onMainAuthChange() {
+            const mode = document.querySelector('input[name="wbAuth"]:checked').value;
+            document.getElementById('wbApiKeyField').classList.toggle('hidden', mode !== 'api_key');
+            const hint = document.getElementById('wbAuthModeHint');
+            if (hint) {
+                hint.textContent = mode === 'token'
+                    ? 'Token 模式下无需填写，凭证在「凭证管理」中维护。'
+                    : '当前为 api_key 认证模式，此项必填。';
+            }
+            updateMainAuthCount(mode);
+        }
+
+        async function updateMainAuthCount(mode) {
+            const el = document.getElementById('wbAuthCount');
+            if (!el) return;
+            if (mode !== 'token') { el.textContent = ''; return; }
+            try {
+                const data = await apiFetch('/credential-pool');
+                const n = (data.credentials || []).length;
+                el.textContent = n
+                    ? `将使用凭证池中的 ${n} 个凭证轮换。`
+                    : '凭证池为空，请先到「凭证管理」添加凭证。';
+            } catch (e) {
+                el.textContent = '';
+            }
+        }
+
+        async function loadCredentialPool(selected) {
+            const box = document.getElementById('tokenList');
+            try {
+                const data = await apiFetch('/credential-pool');
+                credentialPool = data.credentials || [];
+            } catch (e) {
+                box.innerHTML = `<div class="wb-empty">凭证加载失败：${escapeHtml(e.message)}</div>`;
+                return;
+            }
+            if (!credentialPool.length) {
+                box.innerHTML = `<div class="wb-empty">
+                    凭证池为空。请先在「凭证管理」里添加 token，或把凭证文件放入
+                    <code>instances/shared_creds/</code>。
+                </div>`;
+                return;
+            }
+            const chosen = new Set(selected || []);
+            box.innerHTML = credentialPool.map(c => `
+                <label class="wb-token">
+                    <input type="checkbox" value="${escapeHtml(c.name)}"
+                           ${chosen.has(c.name) ? 'checked' : ''}>
+                    <span>
+                        <span class="wb-token-name">${escapeHtml(c.user_id)}</span>
+                        <span class="wb-token-meta">
+                            ${escapeHtml(c.name)}<br>
+                            ${c.domain ? escapeHtml(c.domain) + '<br>' : ''}
+                            ${c.expired ? '⚠️ 已过期' : '预览：' + escapeHtml(c.token_preview)}
+                        </span>
+                    </span>
+                </label>
+            `).join('');
+        }
+
+        async function saveInstance() {
+            const errBox = document.getElementById('instanceFormError');
+            errBox.textContent = '';
+            const mode = document.querySelector('input[name="instAuth"]:checked').value;
+            const portRaw = document.getElementById('instPort').value.trim();
+            const payload = {
+                name: document.getElementById('instName').value.trim(),
+                password: document.getElementById('instPassword').value,
+                auth_mode: mode,
+                api_key: document.getElementById('instApiKey').value.trim(),
+                token_names: mode === 'token'
+                    ? [...document.querySelectorAll('#tokenList input:checked')].map(i => i.value)
+                    : [],
+            };
+            if (portRaw) payload.port = Number(portRaw);
+
+            const btn = document.getElementById('instanceSaveBtn');
+            btn.disabled = true;
+            btn.textContent = '保存中...';
+            try {
+                if (editingInstanceId) {
+                    await apiFetch(`/instances/${editingInstanceId}`, {
+                        method: 'PUT', body: JSON.stringify(payload)
+                    });
+                } else {
+                    await apiFetch('/instances', {
+                        method: 'POST', body: JSON.stringify(payload)
+                    });
+                }
+                closeInstanceForm();
+                showNotification('实例已保存', 'success');
+                await loadInstances();
+            } catch (e) {
+                errBox.textContent = e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '保存';
+            }
+        }
 
         // 设置页面功能
         async function loadSettings() {

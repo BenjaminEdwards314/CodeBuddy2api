@@ -12,7 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.codebuddy_router import router as codebuddy_router, lifecycle_manager
 from src.codebuddy_auth_router import router as codebuddy_auth_router
 from src.settings_router import router as settings_router
+from src.instances_router import router as instances_router
 from src.frontend_router import router as frontend_router
+from src.anthropic_router import router as anthropic_router, anthropic_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import get_server_host, get_server_port, get_log_level
 
@@ -24,16 +27,55 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _auto_refresh_credentials():
+    """后台静默续期已保存的凭证。
+
+    access_token 约 60 天过期；只要 refresh_token 还在有效期内（约 90 天），
+    就能在过期前自动换新，用户无需重新登录。
+    """
+    import glob
+    import os as _os
+
+    from src.codebuddy_auth_router import refresh_saved_token_file
+
+    # 每小时检查一次；只有剩余有效期低于阈值时才真正发请求
+    while True:
+        try:
+            cred_dir = _os.path.expanduser("~/.codebuddy_creds")
+            env_dir = _os.environ.get("CODEBUDDY_CREDENTIALS_DIR")
+            if env_dir:
+                cred_dir = _os.path.expanduser(env_dir)
+            if _os.path.isdir(cred_dir):
+                for path in glob.glob(_os.path.join(cred_dir, "*.json")):
+                    if _os.path.basename(path) == "manager_state.json":
+                        continue
+                    try:
+                        await refresh_saved_token_file(path)
+                    except Exception as exc:
+                        logger.warning(f"续期 {path} 失败: {exc}")
+        except Exception as exc:
+            logger.warning(f"自动续期循环异常: {exc}")
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting CodeBuddy2API Service")
+    refresh_task = None
     try:
         # 启动时初始化资源
         await lifecycle_manager.startup()
+        refresh_task = asyncio.create_task(_auto_refresh_credentials())
         yield
     finally:
         # 关闭时清理资源
+        if refresh_task:
+            refresh_task.cancel()
+            try:
+                await refresh_task
+            except asyncio.CancelledError:
+                pass
         await lifecycle_manager.shutdown()
         logger.info("CodeBuddy2API Service stopped")
 
@@ -81,11 +123,27 @@ app.include_router(
     tags=["OpenAI Compatible API"]
 )
 
+# Anthropic Messages API 兼容端点（Claude Desktop 使用）
+app.include_router(
+    anthropic_router,
+    tags=["Anthropic Compatible API"]
+)
+
+# Anthropic 端点的错误响应转换为标准 Anthropic 错误格式
+app.add_exception_handler(StarletteHTTPException, anthropic_exception_handler)
+
 # 挂载设置路由
 app.include_router(
     settings_router,
     prefix="/api",
     tags=["Settings Management"]
+)
+
+# 挂载多实例（工作台）路由
+app.include_router(
+    instances_router,
+    prefix="/api",
+    tags=["Instance Management"]
 )
 
 # 健康检查端点

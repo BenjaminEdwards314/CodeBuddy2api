@@ -26,7 +26,7 @@
 
 首先，克隆本项目到本地：
 ```bash
-git clone https://github.com/xueyue33/codebuddy2api.git
+git clone https://github.com/BenjaminEdwards314/CodeBuddy2api.git
 cd codebuddy2api
 ```
 
@@ -98,6 +98,124 @@ python web.py
 ```
 
 服务启动后，你就可以开始使用了！
+
+## 🖥️ 桌面应用模式（推荐）
+
+如果不想使用命令行，可以直接以桌面应用方式启动。桌面版会打开一个原生窗口，
+内置了服务进程，并提供一个图形化配置界面来设置**端口**、**API Key** 和**访问密码**。
+
+**macOS / Linux:**
+```bash
+./start_desktop.sh
+```
+
+**Windows:**
+```bash
+start_desktop.bat
+```
+
+**直接运行:**
+```bash
+python desktop.py
+```
+
+启动脚本会自动创建虚拟环境并安装依赖（含 `pywebview`），首次运行需要几分钟。
+
+### 桌面端功能
+
+- **图形化配置**：首次启动若未完成配置，会直接进入配置页面；填写端口、访问密码、
+  CodeBuddy API Key 后点击「保存并应用」即可。
+- **改端口自动重启**：修改端口后服务会在新端口上自动重启，窗口自动跳转到新地址，
+  无需手动操作。
+- **配置持久化**：保存的配置写入 `config/config.json`，下次启动自动生效。
+- **控制面板**：配置完成后可点击「进入控制面板」使用原有的管理界面；
+  在控制面板中点击「桌面配置」标签可随时返回配置页。
+- **状态显示**：窗口底部实时显示服务运行状态与当前访问地址。
+
+> 若端口被占用，保存时会直接提示并拒绝，不会中断正在运行的服务。
+
+### 打包成 macOS 独立应用（.app）
+
+仓库已包含 PyInstaller 配置，可打包成不依赖本机 Python 的独立应用：
+
+```bash
+pip install pyinstaller
+pyinstaller packaging/CodeBuddy2API.spec --noconfirm
+cp -R dist/CodeBuddy2API.app /Applications/
+```
+
+产物为 `dist/CodeBuddy2API.app`，双击即可运行。
+
+**说明：**
+
+- PyInstaller 不支持交叉编译：macOS 的 `.app` 只能在 macOS 上打包，Windows 的 `.exe`
+  需要在 Windows 机器上执行同样的命令。
+- 应用未做 Apple 签名与公证。首次打开若被 Gatekeeper 拦截，请右键点击应用 →
+  选择「打开」，或执行 `xattr -cr /Applications/CodeBuddy2API.app`。
+- 数据目录位于 `~/Library/Application Support/CodeBuddy2API/`
+  （含 `config/config.json` 与 `.codebuddy_creds/`），与源码方式运行的配置相互独立。
+- 首次启动若默认端口 8001 已被占用，应用会自动改用下一个可用端口。
+
+### 检查更新
+
+配置页底部会显示当前版本（版本号 · commit · 打包日期），点击「检查更新」按钮可
+对比上游仓库的最新提交：
+
+- **有新版本**：提示上游最新 commit 与日期，并给出「查看更新内容」链接
+  （仅在浏览器打开，不会自动下载或安装）。
+- **已是最新 / 比上游更新**：明确提示，无需操作。
+- **无法判断**：当本地 commit 未发布到任何远端时，会如实说明无法比较，
+  而不会误报有新版本。
+
+上游仓库目前没有发布任何 release 或 tag，因此更新判断基于默认分支的最新提交。
+
+**更新应用需要重新打包**（`.app` 内的代码是打包好的，不会自动跟随源码变化）：
+
+```bash
+git pull                      # 或 git fetch upstream && git merge upstream/main
+pyinstaller packaging/Server.spec --noconfirm          # 多开所需的无界面服务端
+pyinstaller packaging/CodeBuddy2API.spec --noconfirm   # 桌面应用本体
+cp -R dist/CodeBuddy2API.app /Applications/
+```
+
+配置保存在 `~/Library/Application Support/CodeBuddy2API/`，重新安装不会丢失。
+
+> 注意：从 CodeBuddy 官方新增的模型**不需要**更新代码，模型列表是运行时从服务端获取的。
+
+## 🧩 多开实例（工作台）
+
+管理面板 → **工作台** 标签页可以创建多个相互独立的代理实例，每个实例：
+
+- 有**自己的端口**和**访问密码**（客户端用对应端口 + 密码连接）
+- 可独立选择**认证方式**：`API Key` 或 `Token 轮换`
+- Token 模式下可**多选凭证**，只有选中的凭证会被复制到该实例的独立目录
+- 可同时启动、独立停止，互不影响
+
+实例配置存放在 `~/Library/Application Support/CodeBuddy2API/instances/`，
+重启应用后实例列表保留，但进程不会自动拉起（需要手动点「启动」）。
+
+### 客户端连接示例
+
+```bash
+# 实例运行在 8891，密码 tok_pw
+curl http://127.0.0.1:8891/codebuddy/v1/chat/completions \
+  -H "Authorization: Bearer tok_pw" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v3","messages":[{"role":"user","content":"hi"}]}'
+```
+
+在 Cherry Studio / OpenWebUI 等客户端里，把 **Base URL** 填成
+`http://127.0.0.1:<实例端口>/v1`，**API Key** 填该实例的访问密码即可。
+
+### 实现说明
+
+每个实例是一个**独立进程**，不是同进程内的多个服务。原因是 `config.py` 与凭证管理器
+都把状态放在模块级全局变量里，同进程多实例会互相覆盖配置。独立进程可以让每个实例
+读自己的 `config/config.json`，同时完全复用现有服务端代码。
+
+打包后的 `.app` 里没有 Python 解释器也没有 `web.py`，所以多开所需的子进程由
+`packaging/Server.spec` 单独编译成 `CodeBuddy2API-server` 并放进应用包内——
+这也是上面打包步骤有两条命令的原因。
 
 ## ⚙️ API 使用
 

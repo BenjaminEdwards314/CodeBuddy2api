@@ -19,8 +19,15 @@ class CodeBuddyTokenManager:
         if creds_dir is None:
             from config import get_codebuddy_creds_dir, get_rotation_count
             creds_dir = get_codebuddy_creds_dir()
-        
-        self.creds_dir = os.path.join(os.path.dirname(__file__), '..', creds_dir)
+
+        # Relative paths resolve against the working directory, which the
+        # desktop launcher points at a writable per-user data dir. Inside a
+        # frozen .app the package directory is read-only, so never use it
+        # unless an absolute path was given.
+        if os.path.isabs(creds_dir):
+            self.creds_dir = creds_dir
+        else:
+            self.creds_dir = os.path.abspath(creds_dir)
         self.state_file = os.path.join(self.creds_dir, 'manager_state.json')
         self.credentials = []
         self.current_index = 0  # Start from the first credential
