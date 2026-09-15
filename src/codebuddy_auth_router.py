@@ -126,7 +126,7 @@ async def start_codebuddy_auth() -> Dict[str, Any]:
         headers = get_auth_start_headers()
         
         # 调用 /v2/plugin/auth/state 获取认证状态和URL
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             # 为避免上游/中间层缓存，添加随机nonce参数，确保每次请求唯一
             nonce = secrets.token_hex(8)
             state_url = f"{CODEBUDDY_AUTH_STATE_ENDPOINT}?platform=CLI&nonce={nonce}"
@@ -149,7 +149,7 @@ async def start_codebuddy_auth() -> Dict[str, Any]:
                                 nonce2 = secrets.token_hex(8)
                                 state_url2 = f"{CODEBUDDY_AUTH_STATE_ENDPOINT}?platform=CLI&nonce={nonce2}"
                                 payload2 = {"nonce": nonce2}
-                                async with httpx.AsyncClient(verify=False) as client2:
+                                async with httpx.AsyncClient(verify=False, trust_env=False) as client2:
                                     response2 = await client2.post(state_url2, json=payload2, headers=headers, timeout=30)
                                 if response2.status_code == 200:
                                     result2 = response2.json()
@@ -200,7 +200,7 @@ async def poll_codebuddy_auth_status(auth_state: str) -> Dict[str, Any]:
         headers = get_auth_poll_headers()
         url = f"{CODEBUDDY_AUTH_TOKEN_ENDPOINT}?state={auth_state}"
         
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             response = await client.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
@@ -271,7 +271,7 @@ async def refresh_codebuddy_token(refresh_token: str) -> Optional[Dict[str, Any]
         'X-Request-ID': str(uuid.uuid4()).replace('-', ''),
     }
     try:
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             resp = await client.post(
                 CODEBUDDY_AUTH_REFRESH_ENDPOINT,
                 json={'refresh_token': refresh_token},

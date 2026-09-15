@@ -1190,6 +1190,35 @@
             background: #f59e0b;
         }
 
+        /* 代理状态信号灯：灰=未开启 黄=测试中 绿=通 红=不通 */
+        .proxy-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            align-self: center;
+            cursor: pointer;
+            background: #9ca3af;
+            box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.18);
+            transition: background 0.25s var(--ease), box-shadow 0.25s var(--ease);
+        }
+
+        .proxy-light.testing {
+            background: #f59e0b;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+            animation: pulse 1s infinite;
+        }
+
+        .proxy-light.ok {
+            background: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+        }
+
+        .proxy-light.fail {
+            background: #ef4444;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -1806,8 +1835,10 @@
                     <div class="card-header">
                         <h3 class="card-title">主应用</h3>
                         <div class="card-actions">
-                            <button class="btn btn-secondary" id="wbRestartBtn" onclick="restartMainApp()">
-                                <i class="fas fa-power-off"></i> 重启主应用
+                            <span class="proxy-light" id="wbProxyLight" onclick="testProxyConnection(true)"
+                                  title="代理未开启"></span>
+                            <button class="btn btn-secondary" id="wbProxyBtn" onclick="toggleMainProxy()">
+                                <i class="fas fa-power-off"></i> <span id="wbProxyBtnText">开启代理</span>
                             </button>
                             <button class="btn btn-secondary" id="wbUpdateBtn" onclick="checkUpdateFromWorkbench()">
                                 <i class="fas fa-cloud-download-alt"></i> 检查更新
@@ -3035,9 +3066,11 @@
                     .map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`)
                     .join('');
 
-                // 尽量保留用户原来的选择，否则回到第一项
+                // 尽量保留用户原来的选择；没有历史选择时默认选中 hy3
                 if (models.includes(previous)) {
                     select.value = previous;
+                } else if (models.includes('hy3')) {
+                    select.value = 'hy3';
                 }
             } catch (error) {
                 select.innerHTML = '<option value="">模型加载失败</option>';
@@ -3574,6 +3607,8 @@
             const box = document.getElementById('instanceList');
             if (!box) return;
             loadMainAppInfo();
+            // 若上一次「保存并应用」重启过服务，这里把代理恢复成保存前的状态。
+            restoreProxyAfterSave().then(() => refreshProxyState());
             try {
                 const data = await apiFetch('/instances');
                 instancesCache = data.instances || [];
@@ -3612,7 +3647,6 @@
 
             // 版本/配置走桌面壳的桥；浏览器里打开时没有桥。
             const bridge = window.pywebview && window.pywebview.api;
-            const restartBtn = document.getElementById('wbRestartBtn');
             const updateBtn = document.getElementById('wbUpdateBtn');
             const configBox = document.getElementById('wbConfigBox');
 
@@ -3625,7 +3659,6 @@
             }
 
             // Bridge is present: desktop-only controls are usable.
-            if (restartBtn) restartBtn.style.display = '';
             if (updateBtn) updateBtn.style.display = '';
             if (configBox) configBox.style.display = '';
 
@@ -3697,6 +3730,9 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
             note.textContent = '';
 
+            // 记录保存前的代理状态：保存完要保持原样，不能因为一次保存把代理关掉。
+            const proxyWasOn = proxyEnabled;
+
             try {
                 const res = await bridge.save_config(port, apiKey, password, authMode);
                 if (res && res.ok) {
@@ -3705,12 +3741,19 @@
                     // 端口变更会重启服务，等确认后再跳转，否则页面会失效。
                     if (res.restarted && res.url) {
                         const target = res.url;
+                        // 重启后代理会回到「未开启」，用 sessionStorage 带过跳转边界，
+                        // 让新页面加载完自动恢复成保存前的状态。
+                        try {
+                            sessionStorage.setItem('proxyRestore', proxyWasOn ? '1' : '0');
+                        } catch (e) { /* 隐私模式下不可用，忽略 */ }
                         setTimeout(() => {
                             if (window.location.origin !== target) window.location.href = target + '/';
                             else window.location.reload();
                         }, 1200);
                         return;
                     }
+                    // 服务没重启（只改了密码/API Key），直接原地恢复代理状态。
+                    if (proxyWasOn && !proxyEnabled) await reEnableProxyAfterSave();
                     await loadMainAppInfo();
                 } else {
                     note.textContent = (res && res.message) || '保存失败。';
@@ -3725,34 +3768,123 @@
             }
         }
 
-        async function restartMainApp() {
-            const bridge = window.pywebview && window.pywebview.api;
-            if (!bridge) { showNotification('仅桌面应用内可用', 'error'); return; }
+        // ---- 代理开关 + 状态信号灯 ----
+        // 开关状态存在服务端内存里，桌面端每次启动都是关闭，需手动开启。
+        let proxyEnabled = false;
 
-            const running = (instancesCache || []).filter(i => i.running).length;
-            const extra = running
-                ? `\n\n注意：${running} 个正在运行的实例会继续运行，重启后可在列表中看到。`
-                : '';
-            if (!confirm('确定重启主应用？管理面板会短暂断开。' + extra)) return;
+        function setProxyLight(state, title) {
+            const light = document.getElementById('wbProxyLight');
+            if (!light) return;
+            light.className = 'proxy-light' + (state ? ' ' + state : '');
+            if (title) light.title = title;
+        }
 
-            const btn = document.getElementById('wbRestartBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 重启中...';
+        function renderProxyState() {
+            const text = document.getElementById('wbProxyBtnText');
+            const btn = document.getElementById('wbProxyBtn');
+            if (text) text.textContent = proxyEnabled ? '关闭代理' : '开启代理';
+            if (btn) {
+                btn.classList.toggle('btn-primary', proxyEnabled);
+                btn.classList.toggle('btn-secondary', !proxyEnabled);
+            }
+            const light = document.getElementById('wbProxyLight');
+            if (light && !light.classList.contains('testing')) {
+                setProxyLight('', proxyEnabled ? '代理已开启（未测试）' : '代理未开启');
+            }
+        }
+
+        async function refreshProxyState() {
             try {
-                const res = await bridge.restart_server();
-                if (res && res.ok) {
-                    showNotification('主应用已重启', 'success');
-                    // 等服务重新监听后再刷新，否则页面会直接打不开。
-                    setTimeout(() => { window.location.href = (res.url || window.location.origin) + '/'; }, 1200);
-                } else {
-                    showNotification((res && res.message) || '重启失败', 'error');
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-power-off"></i> 重启主应用';
-                }
+                const res = await fetch('/api/proxy', { headers: getAuthHeaders() });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                proxyEnabled = !!data.enabled;
             } catch (e) {
-                showNotification('重启失败：' + e.message, 'error');
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-power-off"></i> 重启主应用';
+                proxyEnabled = false;
+            }
+            renderProxyState();
+        }
+
+        async function toggleMainProxy() {
+            const btn = document.getElementById('wbProxyBtn');
+            const next = !proxyEnabled;
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ enabled: next }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                proxyEnabled = next;
+                renderProxyState();
+                showNotification(next ? '代理已开启' : '代理已关闭', 'success');
+                // 开启后立即测一次 hy3 连通性；关闭时灯直接回到灰色。
+                if (next) testProxyConnection(false);
+                else setProxyLight('', '代理已关闭');
+            } catch (e) {
+                showNotification('切换失败：' + e.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        // 保存配置后把代理恢复成保存前的状态（服务重启会把它重置为关闭）。
+        async function reEnableProxyAfterSave() {
+            try {
+                const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ enabled: true }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                proxyEnabled = true;
+                renderProxyState();
+                showNotification('代理已重新开启', 'success');
+                testProxyConnection(false);
+            } catch (e) {
+                showNotification('代理重新开启失败：' + e.message, 'error');
+            }
+        }
+
+        // 跨页面跳转（改端口）后恢复代理：读取保存时写入的标记。
+        async function restoreProxyAfterSave() {
+            let flag = null;
+            try {
+                flag = sessionStorage.getItem('proxyRestore');
+                sessionStorage.removeItem('proxyRestore');
+            } catch (e) { return; }
+            if (flag !== '1') return;
+            await refreshProxyState();
+            if (!proxyEnabled) await reEnableProxyAfterSave();
+        }
+
+        async function testProxyConnection(manual) {
+            if (!proxyEnabled) {
+                if (manual) showNotification('请先开启代理', 'error');
+                return;
+            }
+            setProxyLight('testing', '正在测试 hy3 连通性…');
+            try {
+                const res = await fetch('/codebuddy/v1/chat/completions', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        model: 'hy3',
+                        messages: [{ role: 'user', content: 'ping' }],
+                        max_tokens: 1,
+                        stream: false,
+                    }),
+                });
+                if (!res.ok) {
+                    const detail = await res.text().catch(() => '');
+                    throw new Error(`HTTP ${res.status} ${detail.slice(0, 120)}`);
+                }
+                setProxyLight('ok', 'hy3 连通正常（点击可重新测试）');
+                if (manual) showNotification('hy3 连通正常 ✓', 'success');
+            } catch (e) {
+                setProxyLight('fail', 'hy3 不通：' + e.message);
+                if (manual) showNotification('hy3 不通：' + e.message, 'error');
             }
         }
 

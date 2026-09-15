@@ -24,6 +24,7 @@ from .codebuddy_router import (
     get_http_client,
 )
 from .usage_stats_manager import usage_stats_manager
+from .proxy_state import is_enabled as is_proxy_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -575,6 +576,13 @@ async def anthropic_messages(
 ):
     """Anthropic Messages API 兼容端点"""
     try:
+        # 代理开关：关闭时不转发上游
+        if not is_proxy_enabled():
+            raise HTTPException(
+                status_code=503,
+                detail="代理未启动，请在桌面端「工作台」点击「开启代理」",
+            )
+
         try:
             request_body = await request.json()
         except Exception:

@@ -2,6 +2,8 @@
 .env
 .env.*
 .codebuddy_creds/
+# 运行时生成的本地配置（含访问密码，随环境变化）
+config/config.json
 # 批量 API Key 清单，含真实密钥
 key.csv
 *.key.csv

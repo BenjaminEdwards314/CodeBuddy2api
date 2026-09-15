@@ -59,6 +59,7 @@ hiddenimports += [
     "src.codebuddy_token_manager",
     "src.codebuddy_api_client",
     "src.settings_router",
+    "src.proxy_state",
     "src.instances_router",
     "src.instance_manager",
     "src.frontend_router",

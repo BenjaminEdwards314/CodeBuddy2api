@@ -18,6 +18,7 @@ from .codebuddy_api_client import codebuddy_api_client
 from .codebuddy_token_manager import codebuddy_token_manager
 from .usage_stats_manager import usage_stats_manager
 from .keyword_replacer import apply_keyword_replacement_to_system_message
+from .proxy_state import is_enabled as is_proxy_enabled
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -71,7 +72,10 @@ class SecurityConfig:
 HTTP_CLIENT_CONFIG = {
     "verify": SecurityConfig.get_ssl_verify(),
     "timeout": httpx.Timeout(300.0, connect=30.0, read=300.0),
-    "limits": httpx.Limits(max_keepalive_connections=4000, max_connections=4000)
+    "limits": httpx.Limits(max_keepalive_connections=4000, max_connections=4000),
+    # 不读取系统/环境代理设置：macOS 上残留的系统代理（指向无监听的
+    # 127.0.0.1:8080 之类）会被 httpx 默认读取，导致所有上游请求被拒。
+    "trust_env": False,
 }
 
 # --- 异步安全的 HTTP 客户端池 ---
@@ -723,6 +727,13 @@ async def chat_completions(
 ):
     """CodeBuddy V1 聊天完成API - 重构后的简洁版本"""
     try:
+        # 代理开关：关闭时不转发上游
+        if not is_proxy_enabled():
+            raise HTTPException(
+                status_code=503,
+                detail="代理未启动，请在桌面端「工作台」点击「开启代理」",
+            )
+
         # 解析和验证请求体
         try:
             request_body = await request.json()

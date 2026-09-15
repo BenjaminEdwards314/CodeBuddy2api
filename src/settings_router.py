@@ -9,6 +9,7 @@ from typing import Dict, Any
 
 from .auth import authenticate
 from config import get_active_config, update_settings
+from .proxy_state import is_enabled, set_enabled
 from .usage_stats_manager import usage_stats_manager
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,23 @@ SETTING_LABELS = {
 
 class Settings(BaseModel):
     settings: Dict[str, Any]
+
+class ProxyToggle(BaseModel):
+    enabled: bool
+
+@router.get("/proxy", summary="Get proxy forwarding state")
+async def get_proxy_state(_token: str = Depends(authenticate)):
+    """代理转发是否已开启（主应用开关）。"""
+    return {"enabled": is_enabled()}
+
+@router.post("/proxy", summary="Enable or disable proxy forwarding")
+async def set_proxy_state(payload: ProxyToggle, _token: str = Depends(authenticate)):
+    """开启/关闭代理转发。关闭时上游推理请求会被拒绝（503）。"""
+    enabled = set_enabled(payload.enabled)
+    return {
+        "enabled": enabled,
+        "message": "代理已开启" if enabled else "代理已关闭",
+    }
 
 @router.get("/settings", summary="Get all current active settings and labels")
 async def get_settings(_token: str = Depends(authenticate)):

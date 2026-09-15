@@ -36,7 +36,7 @@ def _git(*args):
 # Stamp the build with its commit so the app can tell the user whether a newer
 # upstream commit exists. Written next to the bundled code and read at runtime.
 _build_info = {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "commit": _git("rev-parse", "HEAD"),
     "commit_short": _git("rev-parse", "--short", "HEAD"),
     "build_date": date.today().isoformat(),
@@ -99,6 +99,7 @@ hiddenimports += [
     "src.auth",
     "src.frontend_router",
     "src.settings_router",
+    "src.proxy_state",
     "src.codebuddy_router",
     "src.codebuddy_auth_router",
     "src.anthropic_router",
@@ -160,8 +161,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "CodeBuddy2API",
         "CFBundleDisplayName": "CodeBuddy2API",
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "1.1.0",
         "NSHighResolutionCapable": True,
         # Needed so the app can talk to its own local HTTP server.
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

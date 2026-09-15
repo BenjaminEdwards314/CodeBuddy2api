@@ -29,7 +29,7 @@ from typing import Optional
 APP_NAME = "CodeBuddy2API"
 
 # --- Version / update check ------------------------------------------------
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # Where update information is read from. The project publishes no GitHub
 # releases or tags, so the latest commit on the default branch is the only
@@ -750,6 +750,11 @@ def main() -> int:
 
     server = EmbeddedServer()
     logger.info(f"Starting CodeBuddy2API desktop (port {server.port})")
+
+    # 桌面端启动时代理默认关闭：面板照常可用，但转发上游要用户在工作台点
+    # 「开启代理」。多开实例是独立进程，不受这里影响。
+    from src.proxy_state import set_enabled as _set_proxy_enabled
+    _set_proxy_enabled(False)
 
     if not server.start():
         # On a fresh install the default port may already be taken by another
