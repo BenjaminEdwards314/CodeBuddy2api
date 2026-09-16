@@ -29,18 +29,34 @@ from typing import Optional
 APP_NAME = "CodeBuddy2API"
 
 # --- Version / update check ------------------------------------------------
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
-# Where update information is read from. The project publishes no GitHub
-# releases or tags, so the latest commit on the default branch is the only
-# meaningful signal.
-UPSTREAM_REPO = "Sliverkiss/CodeBuddy2api"
+# Where update information is read from. Update checks compare this build's
+# commit against the latest commit on the default branch of this repo, so it
+# must be the repository that actually publishes the desktop builds.
+UPSTREAM_REPO = "BenjaminEdwards314/CodeBuddy2api"
 UPSTREAM_BRANCH = "main"
 UPSTREAM_COMMITS_API = (
     f"https://api.github.com/repos/{UPSTREAM_REPO}/commits/{UPSTREAM_BRANCH}"
 )
 UPSTREAM_REPO_URL = f"https://github.com/{UPSTREAM_REPO}"
 UPDATE_TIMEOUT = 8.0
+
+
+def _urlopen_no_proxy(request, timeout: float = UPDATE_TIMEOUT) -> bytes:
+    """Open a URL ignoring HTTP(S)_PROXY from the environment.
+
+    urllib honours *_PROXY by default. On machines with a stale or
+    unreachable corporate/system proxy set in the environment, every update
+    check would fail with a connection error even though GitHub is plainly
+    reachable. Same reasoning as `trust_env=False` for the upstream httpx
+    client, so the check talks to GitHub directly.
+    """
+    import urllib.request
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as resp:
+        return resp.read()
 
 
 def get_build_info() -> dict:
@@ -601,8 +617,7 @@ class DesktopApi:
                     "User-Agent": f"{APP_NAME}/{APP_VERSION}",
                 },
             )
-            with urllib.request.urlopen(request, timeout=UPDATE_TIMEOUT) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            payload = json.loads(_urlopen_no_proxy(request).decode("utf-8"))
         except Exception as exc:
             logger.warning(f"Update check failed: {exc}")
             return None
@@ -635,12 +650,19 @@ class DesktopApi:
                     "User-Agent": f"{APP_NAME}/{APP_VERSION}",
                 },
             )
-            with urllib.request.urlopen(request, timeout=UPDATE_TIMEOUT) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            payload = json.loads(_urlopen_no_proxy(request).decode("utf-8"))
 
+            # GitHub reports the comparison from the *base* commit's point of
+            # view: comparing `local...remote` yields "ahead" when the remote
+            # has commits the local build lacks, i.e. the user is behind.
+            # Invert it so callers always get the local build's perspective.
             status = (payload.get("status") or "").lower()
-            if status in ("behind", "ahead", "diverged"):
-                return status
+            if status == "ahead":
+                return "behind"
+            if status == "behind":
+                return "ahead"
+            if status == "diverged":
+                return "diverged"
             return "unknown"
         except Exception as exc:
             logger.info(f"GitHub comparison unavailable: {exc}")
