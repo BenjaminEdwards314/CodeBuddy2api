@@ -35,8 +35,14 @@ MODEL_ALIASES = {
     "glm5v-turbo": "glm-5v-turbo",
 }
 
-def get_codebuddy_api_url() -> str:
-    """延迟加载 CodeBuddy API URL"""
+def get_codebuddy_api_url(base_url: Optional[str] = None) -> str:
+    """延迟加载 CodeBuddy API URL
+
+    base_url 传入时按其拼接（凭证所属区域可能不是配置里的默认区域），
+    否则沿用配置端点并缓存。
+    """
+    if base_url:
+        return f"{base_url}/v2/chat/completions"
     global _codebuddy_api_url
     if _codebuddy_api_url is None:
         from config import get_codebuddy_api_endpoint
@@ -509,11 +515,11 @@ class CodeBuddyStreamService:
         else:
             raise HTTPException(status_code=status_code, detail=f"CodeBuddy API error: {error_msg}")
     
-    async def handle_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str]) -> StreamingResponse:
+    async def handle_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str], base_url: Optional[str] = None) -> StreamingResponse:
         """处理流式响应 - 使用OpenAI兼容性转换器修复格式问题"""
         async def stream_core():
             client = await get_http_client()
-            async with client.stream("POST", get_codebuddy_api_url(), json=payload, headers=headers) as response:
+            async with client.stream("POST", get_codebuddy_api_url(base_url), json=payload, headers=headers) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()
                     error_msg = error_text.decode('utf-8', errors='ignore')
@@ -577,11 +583,11 @@ class CodeBuddyStreamService:
         
         return StreamingResponse(stream_with_retry(), media_type="text/event-stream", headers=SSE_HEADERS)
     
-    async def handle_non_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    async def handle_non_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str], base_url: Optional[str] = None) -> Dict[str, Any]:
         """处理非流式响应 - 使用修复后的聚合器，支持多工具调用"""
         try:
             client = await get_http_client()
-            response = await client.post(get_codebuddy_api_url(), json=payload, headers=headers)
+            response = await client.post(get_codebuddy_api_url(base_url), json=payload, headers=headers)
             
             if response.status_code != 200:
                 error_msg = response.text
@@ -703,10 +709,13 @@ class CredentialManager:
             if not bearer_token:
                 raise HTTPException(status_code=401, detail="无效的CodeBuddy凭证")
             
+            # 凭证与区域绑定：按其 domain 选择上游域名，避免国际令牌打到国内入口。
+            from config import get_api_endpoint_for_credential
             return {
                 "type": "bearer",
                 "bearer_token": bearer_token,
-                "user_id": credential.get('user_id')
+                "user_id": credential.get('user_id'),
+                "base_url": get_api_endpoint_for_credential(credential)
             }
         except HTTPException:
             raise
@@ -748,13 +757,15 @@ async def chat_completions(
         auth_context = CredentialManager.get_auth_context()
         
         # 生成请求头
+        upstream_base_url = auth_context.get('base_url')
         headers = codebuddy_api_client.generate_codebuddy_headers(
             auth=auth_context,
             user_id=auth_context.get('user_id'),
             conversation_id=x_conversation_id,
             conversation_request_id=x_conversation_request_id,
             conversation_message_id=x_conversation_message_id,
-            request_id=x_request_id
+            request_id=x_request_id,
+            base_url=upstream_base_url
         )
         
         # 预处理请求
@@ -766,9 +777,9 @@ async def chat_completions(
         client_wants_stream = request_body.get("stream", False)
         
         if client_wants_stream:
-            return await service.handle_stream_response(payload, headers)
+            return await service.handle_stream_response(payload, headers, upstream_base_url)
         else:
-            return await service.handle_non_stream_response(payload, headers)
+            return await service.handle_non_stream_response(payload, headers, upstream_base_url)
                 
     except HTTPException:
         raise

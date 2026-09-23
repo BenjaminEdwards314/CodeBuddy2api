@@ -144,6 +144,40 @@ def get_codebuddy_api_key() -> Optional[str]:
 def get_codebuddy_internet_environment() -> str:
     return str(_get_config_value("CODEBUDDY_INTERNET_ENVIRONMENT") or "").strip().lower()
 
+# 国内 / 国际是两套独立的官方域名，令牌与区域绑定。
+CODEBUDDY_REGION_ENDPOINTS = {
+    "internal": "https://copilot.tencent.com",
+    "international": "https://www.codebuddy.ai",
+}
+
+def get_explicit_api_endpoint() -> str:
+    """用户显式配置的 API 端点；未配置时返回空串。"""
+    return str(_get_config_value("CODEBUDDY_API_ENDPOINT") or "").strip().rstrip("/")
+
+def get_region_from_domain(domain: Optional[str]) -> Optional[str]:
+    """按凭证记录的 domain 判断它属于哪个区域；无法判断时返回 None。"""
+    value = str(domain or "").strip().lower()
+    if not value:
+        return None
+    if "tencent.com" in value or "workbuddy" in value or "codebuddy.cn" in value:
+        return "internal"
+    if "codebuddy.ai" in value:
+        return "international"
+    return None
+
+def get_api_endpoint_for_credential(credential: Optional[Dict[str, Any]]) -> str:
+    """凭证自带 domain 时按其区域选端点，避免把国际令牌发到国内域名。
+
+    仅在 CODEBUDDY_API_ENDPOINT 未显式配置时生效——用户手填端点应被尊重。
+    """
+    explicit = get_explicit_api_endpoint()
+    if explicit:
+        return explicit
+    region = get_region_from_domain((credential or {}).get("domain"))
+    if region:
+        return CODEBUDDY_REGION_ENDPOINTS[region]
+    return get_codebuddy_api_endpoint()
+
 def get_codebuddy_creds_dir() -> str:
     return str(_get_config_value("CODEBUDDY_CREDS_DIR"))
 

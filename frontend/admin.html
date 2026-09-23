@@ -1639,11 +1639,16 @@
                         <h3 class="card-title"><i class="fas fa-magic"></i> 自动获取认证</h3>
                     </div>
                     <p style="margin-bottom: 1rem; color: var(--secondary-color);">
-                        点击下方按钮自动启动CodeBuddy OAuth2认证流程，系统将自动获取并保存您的认证凭证。
+                        选择账号所属区域后启动 CodeBuddy OAuth2 认证，系统将自动获取并保存认证凭证。凭证与区域绑定，请按账号实际归属选择。
                     </p>
-                    <button class="btn btn-primary" id="getAuthBtn" onclick="startAuth()">
-                        <i class="fas fa-play"></i> 开始认证
-                    </button>
+                    <div class="auth-buttons">
+                        <button class="btn btn-primary" id="getAuthBtn" onclick="startAuth('internal')">
+                            <i class="fas fa-play"></i> 国内认证
+                        </button>
+                        <button class="btn btn-primary" id="getAuthIntlBtn" onclick="startAuth('international')">
+                            <i class="fas fa-globe"></i> 国外认证
+                        </button>
+                    </div>
                     
                     <!-- 认证URL显示区域 -->
                     <div id="authUrlSection" class="auth-url-section hidden">
@@ -3152,10 +3157,17 @@
         }
 
         // OAuth2认证相关功能
-        async function startAuth() {
-            const btn = document.getElementById('getAuthBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在获取认证链接...';
+        // 区域名 -> 按钮/文案，用于两个入口共用同一套流程
+        const AUTH_REGIONS = {
+            internal: { btn: 'getAuthBtn', label: '国内认证' },
+            international: { btn: 'getAuthIntlBtn', label: '国外认证' }
+        };
+
+        async function startAuth(region) {
+            const meta = AUTH_REGIONS[region] || AUTH_REGIONS.internal;
+            const btn = document.getElementById(meta.btn);
+            setAuthButtonsDisabled(true);
+            if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在获取认证链接...';
             // 确保清理旧的轮询和状态，并显示链接区域
             try { stopPolling(); } catch (e) {}
             currentAuthData = null;
@@ -3168,14 +3180,15 @@
             }
             
             try {
-                const response = await fetch('/codebuddy/auth/start', { method: 'GET' });
+                const response = await fetch(`/codebuddy/auth/start?region=${encodeURIComponent(region)}`, { method: 'GET' });
                 const data = await response.json();
                 
                 // 修正：检查正确的响应字段 `verification_uri_complete`
                 if (response.ok && data.verification_uri_complete) {
                     // 保存所有必要信息以供轮询使用
                     currentAuthData = {
-                        auth_state: data.auth_state
+                        auth_state: data.auth_state,
+                        region: data.region || region
                     };
 
                     // 修正：使用正确的字段来设置输入框的值，并显示该区域
@@ -3186,7 +3199,7 @@
                     
                     // 自动拉起系统默认浏览器，省去手动点「打开链接」
                     openAuthUrl({ silent: true });
-                    showNotification('🌐 已自动打开登录页面，请完成登录', 'success');
+                    showNotification(`🌐 已自动打开${meta.label}登录页面，请完成登录`, 'success');
 
                     // 立即开始轮询（后台自动等待并落库）
                     pollForToken();
@@ -3201,10 +3214,19 @@
             }
         }
 
+        function setAuthButtonsDisabled(disabled) {
+            Object.values(AUTH_REGIONS).forEach(({ btn }) => {
+                const el = document.getElementById(btn);
+                if (el) el.disabled = disabled;
+            });
+        }
+
         function resetAuthButton() {
-            const btn = document.getElementById('getAuthBtn');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-play"></i> 开始认证';
+            setAuthButtonsDisabled(false);
+            document.getElementById('getAuthBtn').innerHTML =
+                '<i class="fas fa-play"></i> 国内认证';
+            document.getElementById('getAuthIntlBtn').innerHTML =
+                '<i class="fas fa-globe"></i> 国外认证';
         }
 
         async function silentRefreshAll() {
@@ -3357,7 +3379,8 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            auth_state: currentAuthData.auth_state // 修正：发送auth_state
+                            auth_state: currentAuthData.auth_state, // 修正：发送auth_state
+                            region: currentAuthData.region
                         })
                     });
 

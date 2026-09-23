@@ -639,9 +639,11 @@ async def anthropic_messages(
 
         # 获取认证并生成上游请求头
         auth_context = CredentialManager.get_auth_context()
+        upstream_base_url = auth_context.get("base_url")
         headers = codebuddy_api_client.generate_codebuddy_headers(
             auth=auth_context,
             user_id=auth_context.get("user_id") or None,
+            base_url=upstream_base_url,
         )
         usage_stats_manager.record_model_usage(oai_payload.get("model", "unknown"))
 
@@ -667,7 +669,7 @@ async def anthropic_messages(
                         wait = _last_upstream_ts[0] + min_interval - now
                         if wait > 0:
                             await asyncio.sleep(wait)
-                        oai_response = await service.handle_non_stream_response(oai_payload, headers)
+                        oai_response = await service.handle_non_stream_response(oai_payload, headers, upstream_base_url)
                         _last_upstream_ts[0] = _time.time()
                         _consecutive_upstream_failures[0] = 0
                     break

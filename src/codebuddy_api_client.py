@@ -174,13 +174,15 @@ class CodeBuddyAPIClient:
         conversation_id: Optional[str] = None,
         conversation_request_id: Optional[str] = None,
         conversation_message_id: Optional[str] = None,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        base_url: Optional[str] = None
     ) -> Dict[str, str]:
         """
         生成 CodeBuddy API 所需的完整请求头。
         优先使用传入的会话ID，如果未提供则随机生成。
+        base_url 用于按凭证所属区域覆盖域名（国内/国际 Host 不同）。
         """
-        parsed_base_url = urlparse(self.base_url)
+        parsed_base_url = urlparse(base_url or self.base_url)
         domain = parsed_base_url.netloc or "www.codebuddy.ai"
         auth_type = (auth or {}).get("type")
         resolved_user_id = user_id or (auth or {}).get("user_id")

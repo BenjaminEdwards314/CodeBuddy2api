@@ -15,7 +15,13 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from config import get_server_password, get_codebuddy_api_endpoint
+from config import (
+    get_server_password,
+    get_codebuddy_api_endpoint,
+    get_codebuddy_internet_environment,
+    get_explicit_api_endpoint,
+    get_region_from_domain,
+)
 import logging
 import os
 
@@ -34,6 +40,23 @@ CODEBUDDY_AUTH_STATE_ENDPOINT = f'{CODEBUDDY_BASE_URL}/v2/plugin/auth/state'
 # refresh_token 有效期内（约 90 天）就能一直续下去。
 CODEBUDDY_AUTH_REFRESH_ENDPOINT = f'{CODEBUDDY_BASE_URL}/v2/plugin/auth/token/refresh'
 CODEBUDDY_AUTH_HOST = urlparse(CODEBUDDY_BASE_URL).netloc or 'www.codebuddy.ai'
+
+# 区域端点：国内 / 国际是两套完全独立的域名。令牌与区域绑定，用错域名登录
+# 会拿到无法使用的凭证——所以前端「国内认证 / 国外认证」必须显式指定区域。
+REGION_ENDPOINTS: Dict[str, str] = {
+    'internal': 'https://copilot.tencent.com',
+    'international': 'https://www.codebuddy.ai',
+}
+# 默认区域跟随 CODEBUDDY_INTERNET_ENVIRONMENT（internal/ioa 为国内），
+# 与 config.get_codebuddy_api_endpoint() 的解析规则保持一致。
+DEFAULT_AUTH_REGION = (
+    'internal' if get_codebuddy_internet_environment() in ('internal', 'ioa') else 'international'
+)
+# 用户显式配置的端点（私有部署）优先于官方域名
+_EXPLICIT_API_ENDPOINT = get_explicit_api_endpoint()
+# auth_state -> 区域：/auth/poll 只带 state，需要据此还原认证域名。
+_auth_state_regions: Dict[str, str] = {}
+_AUTH_STATE_REGION_LIMIT = 32
 _last_auth_state: Optional[str] = None
 
 # --- Router Setup ---
@@ -71,18 +94,49 @@ def generate_auth_state() -> str:
     random_part = secrets.token_hex(16)
     return f"{random_part}_{timestamp}"
 
-def get_auth_start_headers() -> Dict[str, str]:
+def normalize_auth_region(region: Optional[str]) -> str:
+    """把前端传来的区域名归一化；无法识别时回落到配置默认区域。"""
+    value = str(region or '').strip().lower()
+    if value in ('internal', 'cn', 'china', 'domestic', '国内'):
+        return 'internal'
+    if value in ('international', 'intl', 'global', 'overseas', 'public', '国外', '国际'):
+        return 'international'
+    return DEFAULT_AUTH_REGION
+
+
+def get_region_endpoints(region: str) -> Dict[str, str]:
+    """返回指定区域的 base_url / host / 各端点，避免模块级常量只能有一个区域。
+
+    用户显式配置了 CODEBUDDY_API_ENDPOINT 时，默认区域沿用该自定义端点
+    （尊重私有部署）；另一个区域仍走官方域名。
+    """
+    region = normalize_auth_region(region)
+    if region == DEFAULT_AUTH_REGION and _EXPLICIT_API_ENDPOINT:
+        base_url = _EXPLICIT_API_ENDPOINT
+    else:
+        base_url = REGION_ENDPOINTS.get(region, CODEBUDDY_BASE_URL)
+    return {
+        'base_url': base_url,
+        'host': urlparse(base_url).netloc or CODEBUDDY_AUTH_HOST,
+        'token_endpoint': f'{base_url}/v2/plugin/auth/token',
+        'state_endpoint': f'{base_url}/v2/plugin/auth/state',
+        'refresh_endpoint': f'{base_url}/v2/plugin/auth/token/refresh',
+    }
+
+
+def get_auth_start_headers(region: Optional[str] = None) -> Dict[str, str]:
     """生成启动认证(/state)所需的请求头"""
+    host = get_region_endpoints(region or DEFAULT_AUTH_REGION)['host']
     request_id = str(uuid.uuid4()).replace('-', '')
     return {
-        'Host': CODEBUDDY_AUTH_HOST,
+        'Host': host,
         'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
         'Connection': 'close',
         'X-Requested-With': 'XMLHttpRequest',
-        'X-Domain': CODEBUDDY_AUTH_HOST,
+        'X-Domain': host,
         'X-No-Authorization': 'true',
         'X-No-User-Id': 'true',
         'X-No-Enterprise-Id': 'true',
@@ -92,12 +146,13 @@ def get_auth_start_headers() -> Dict[str, str]:
         'X-Request-ID': request_id,
     }
 
-def get_auth_poll_headers() -> Dict[str, str]:
+def get_auth_poll_headers(region: Optional[str] = None) -> Dict[str, str]:
     """生成轮询认证(/token)所需的请求头"""
+    host = get_region_endpoints(region or DEFAULT_AUTH_REGION)['host']
     request_id = str(uuid.uuid4()).replace('-', '')
     span_id = secrets.token_hex(8)
     return {
-        'Host': CODEBUDDY_AUTH_HOST,
+        'Host': host,
         'Accept': 'application/json, text/plain, */*',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
@@ -113,23 +168,25 @@ def get_auth_poll_headers() -> Dict[str, str]:
         'X-No-User-Id': 'true',
         'X-No-Enterprise-Id': 'true',
         'X-No-Department-Info': 'true',
-        'X-Domain': CODEBUDDY_AUTH_HOST,
+        'X-Domain': host,
         'User-Agent': 'CLI/1.0.8 CodeBuddy/1.0.8',
         'X-Product': 'SaaS',
     }
 
-async def start_codebuddy_auth() -> Dict[str, Any]:
-    """启动CodeBuddy认证流程"""
+async def start_codebuddy_auth(region: Optional[str] = None) -> Dict[str, Any]:
+    """启动CodeBuddy认证流程（按区域选择国内/国际域名）"""
+    region = normalize_auth_region(region)
+    endpoints = get_region_endpoints(region)
     try:
-        logger.info("启动CodeBuddy认证流程...")
+        logger.info(f"启动CodeBuddy认证流程... region={region} base={endpoints['base_url']}")
         
-        headers = get_auth_start_headers()
+        headers = get_auth_start_headers(region)
         
         # 调用 /v2/plugin/auth/state 获取认证状态和URL
         async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             # 为避免上游/中间层缓存，添加随机nonce参数，确保每次请求唯一
             nonce = secrets.token_hex(8)
-            state_url = f"{CODEBUDDY_AUTH_STATE_ENDPOINT}?platform=CLI&nonce={nonce}"
+            state_url = f"{endpoints['state_endpoint']}?platform=CLI&nonce={nonce}"
             payload = {"nonce": nonce}
             
             response = await client.post(state_url, json=payload, headers=headers, timeout=30)
@@ -147,7 +204,7 @@ async def start_codebuddy_auth() -> Dict[str, Any]:
                             logger.warning("上游返回的state与上一次相同，尝试重新获取新的state...")
                             try:
                                 nonce2 = secrets.token_hex(8)
-                                state_url2 = f"{CODEBUDDY_AUTH_STATE_ENDPOINT}?platform=CLI&nonce={nonce2}"
+                                state_url2 = f"{endpoints['state_endpoint']}?platform=CLI&nonce={nonce2}"
                                 payload2 = {"nonce": nonce2}
                                 async with httpx.AsyncClient(verify=False, trust_env=False) as client2:
                                     response2 = await client2.post(state_url2, json=payload2, headers=headers, timeout=30)
@@ -162,15 +219,20 @@ async def start_codebuddy_auth() -> Dict[str, Any]:
                                             auth_url = nu
                             except Exception:
                                 pass
-                        token_endpoint = f"{CODEBUDDY_AUTH_TOKEN_ENDPOINT}?state={auth_state}"
+                        token_endpoint = f"{endpoints['token_endpoint']}?state={auth_state}"
                         _last_auth_state = auth_state
+                        # 记录 state 对应的区域，供 /auth/poll 还原认证域名
+                        _auth_state_regions[auth_state] = region
+                        while len(_auth_state_regions) > _AUTH_STATE_REGION_LIMIT:
+                            _auth_state_regions.pop(next(iter(_auth_state_regions)), None)
                         
                         return {
                             "success": True,
                             "method": "codebuddy_real_auth",
                             "auth_state": auth_state,
+                            "region": region,
                             "verification_uri_complete": auth_url,
-                            "verification_uri": CODEBUDDY_BASE_URL,
+                            "verification_uri": endpoints['base_url'],
                             "token_endpoint": token_endpoint,
                             "expires_in": 1800,
                             "interval": 5,
@@ -191,14 +253,16 @@ async def start_codebuddy_auth() -> Dict[str, Any]:
         return {
             "success": False,
             "error": "auth_start_failed", 
+            "region": region,
             "message": f"认证启动失败: {str(e)}"
         }
 
-async def poll_codebuddy_auth_status(auth_state: str) -> Dict[str, Any]:
-    """轮询CodeBuddy认证状态"""
+async def poll_codebuddy_auth_status(auth_state: str, region: Optional[str] = None) -> Dict[str, Any]:
+    """轮询CodeBuddy认证状态（区域必须与发起时一致）"""
+    region = normalize_auth_region(region or _auth_state_regions.get(auth_state))
     try:
-        headers = get_auth_poll_headers()
-        url = f"{CODEBUDDY_AUTH_TOKEN_ENDPOINT}?state={auth_state}"
+        headers = get_auth_poll_headers(region)
+        url = f"{get_region_endpoints(region)['token_endpoint']}?state={auth_state}"
         
         async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             response = await client.get(url, headers=headers, timeout=30)
@@ -227,7 +291,7 @@ async def poll_codebuddy_auth_status(auth_state: str) -> Dict[str, Any]:
                             "refresh_token": data.get('refreshToken'),
                             "session_state": data.get('sessionState'),
                             "scope": data.get('scope'),
-                            "domain": data.get('domain'),
+                            "domain": data.get('domain') or get_region_endpoints(region)['host'],
                             "full_response": result
                         }
                     }
@@ -253,19 +317,21 @@ async def poll_codebuddy_auth_status(auth_state: str) -> Dict[str, Any]:
             "message": f"轮询失败: {str(e)}"
         }
 
-async def refresh_codebuddy_token(refresh_token: str) -> Optional[Dict[str, Any]]:
+async def refresh_codebuddy_token(refresh_token: str, region: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """用 refresh_token 静默换取新的 access_token（无需用户登录）。
 
     成功返回新的 token 数据字典，失败返回 None。
     """
     if not refresh_token:
         return None
+    region = normalize_auth_region(region)
+    host = get_region_endpoints(region)['host']
     headers = {
-        'Host': CODEBUDDY_AUTH_HOST,
+        'Host': host,
         'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
         'X-Refresh-Token': refresh_token,
-        'X-Domain': CODEBUDDY_AUTH_HOST,
+        'X-Domain': host,
         'User-Agent': 'CLI/1.0.8 CodeBuddy/1.0.8',
         'X-Product': 'SaaS',
         'X-Request-ID': str(uuid.uuid4()).replace('-', ''),
@@ -273,7 +339,7 @@ async def refresh_codebuddy_token(refresh_token: str) -> Optional[Dict[str, Any]
     try:
         async with httpx.AsyncClient(verify=False, trust_env=False) as client:
             resp = await client.post(
-                CODEBUDDY_AUTH_REFRESH_ENDPOINT,
+                get_region_endpoints(region)['refresh_endpoint'],
                 json={'refresh_token': refresh_token},
                 headers=headers,
                 timeout=30,
@@ -296,11 +362,16 @@ async def refresh_codebuddy_token(refresh_token: str) -> Optional[Dict[str, Any]
             'expires_in': data.get('expiresIn'),
             'token_type': data.get('tokenType', 'Bearer'),
             'scope': data.get('scope'),
-            'domain': data.get('domain') or CODEBUDDY_AUTH_HOST,
+            'domain': data.get('domain') or host,
         }
     except Exception as exc:
         logger.warning(f"刷新 token 异常: {exc}")
         return None
+
+
+def region_from_credential(cred: Dict[str, Any]) -> str:
+    """按凭证自身记录的 domain 判断区域，老凭证缺少该字段时回落到配置默认。"""
+    return get_region_from_domain((cred or {}).get('domain')) or DEFAULT_AUTH_REGION
 
 
 async def refresh_saved_token_file(path: str, force: bool = False) -> bool:
@@ -335,7 +406,7 @@ async def refresh_saved_token_file(path: str, force: bool = False) -> bool:
         if exp and (exp - time.time()) > 7 * 86400:
             return False
 
-    refreshed = await refresh_codebuddy_token(refresh_token)
+    refreshed = await refresh_codebuddy_token(refresh_token, region=region_from_credential(cred))
     if not refreshed:
         return False
 
@@ -466,13 +537,13 @@ async def save_codebuddy_token(token_data: Dict[str, Any]) -> bool:
 
 # --- API Endpoints ---
 @router.get("/auth/start", summary="Start CodeBuddy Authentication")
-async def start_device_auth():
-    """启动CodeBuddy认证流程"""
+async def start_device_auth(region: Optional[str] = None):
+    """启动CodeBuddy认证流程。region=internal 国内，international 国外。"""
     try:
-        logger.info("开始启动CodeBuddy认证流程...")
+        logger.info(f"开始启动CodeBuddy认证流程... region={region}")
         
         # 尝试真实的CodeBuddy认证API
-        real_auth_result = await start_codebuddy_auth()
+        real_auth_result = await start_codebuddy_auth(region)
         
         if real_auth_result.get('success'):
             logger.info("真实CodeBuddy认证API启动成功!")
@@ -493,7 +564,8 @@ async def start_device_auth():
 async def poll_for_token(
     device_code: str = Body(None, embed=True),
     code_verifier: str = Body(None, embed=True),
-    auth_state: str = Body(None, embed=True)
+    auth_state: str = Body(None, embed=True),
+    region: str = Body(None, embed=True)
 ):
     """轮询CodeBuddy token端点"""
     from .codebuddy_token_manager import codebuddy_token_manager
@@ -501,8 +573,7 @@ async def poll_for_token(
     # 如果有auth_state，说明是真实的CodeBuddy认证流程
     if auth_state:
         logger.info(f"轮询真实CodeBuddy认证状态: {auth_state}")
-        poll_result = await poll_codebuddy_auth_status(auth_state)
-        
+        poll_result = await poll_codebuddy_auth_status(auth_state, region=region)
         if poll_result.get('status') == 'success':
             # 认证成功，保存token
             token_data = poll_result.get('token_data', {})
