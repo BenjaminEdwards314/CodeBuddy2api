@@ -1459,22 +1459,37 @@
                 CodeBuddy2API
             </div>
             <div class="login-subtitle">
-                请输入管理密码以访问控制面板
+                使用 CodeBuddy 账号授权登录，授权成功后凭证会自动保存
             </div>
-            <form class="login-form" onsubmit="handleLogin(event)">
-                <input
-                    type="password"
-                    id="loginPassword"
-                    class="login-input"
-                    placeholder="请输入密码"
-                    required
-                    autocomplete="current-password"
-                >
-                <button type="submit" id="loginButton" class="login-button">
-                    <i class="fas fa-sign-in-alt"></i> 登录
+
+            <!-- 未开始授权：主入口 -->
+            <div id="loginAuthStart" class="login-form">
+                <button type="button" id="loginAuthBtn" class="login-button" onclick="startLoginAuth()">
+                    <i class="fas fa-play"></i> 国内认证
                 </button>
                 <div id="loginError" class="login-error hidden"></div>
-            </form>
+            </div>
+
+            <!-- 已生成链接：等待用户完成授权 -->
+            <div id="loginAuthPending" class="login-form hidden">
+                <div class="auth-progress">
+                    <i class="fas fa-clock"></i>
+                    <div>等待授权完成...</div>
+                    <small id="loginWaitHint" style="color: var(--secondary-color);">完成登录后自动进入控制面板</small>
+                </div>
+                <input type="text" id="loginAuthUrl" class="auth-url-input" readonly>
+                <div class="auth-buttons">
+                    <button type="button" class="btn btn-success" onclick="openLoginAuthUrl()">
+                        <i class="fas fa-external-link-alt"></i> 重新打开链接
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="copyLoginAuthUrl()">
+                        <i class="fas fa-copy"></i> 复制链接
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="cancelLoginAuth()">
+                        <i class="fas fa-times"></i> 取消
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2018,8 +2033,11 @@
         let isAuthenticated = false;
         let credentialsCache = []; // 用于缓存凭证和其状态
 
-        // 本地默认密码：桌面/本地部署下直接进入管理面板，不再要求输入。
+        // 本地默认密码：仅用于管理接口鉴权，登录门槛由 CodeBuddy 授权承担。
         const DEFAULT_SERVICE_PASSWORD = 'cb_local_pwd';
+
+        // 登录态标记：授权成功后写入，刷新页面时据此免去重复授权。
+        const LOGIN_FLAG = 'codebuddyLoggedIn';
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -2029,29 +2047,201 @@
             if (!sessionStorage.getItem('serviceStartTime')) {
                 sessionStorage.setItem('serviceStartTime', Date.now().toString());
             }
-            
-            // 直接进入管理面板：优先沿用会话中已保存的密码，否则用本地默认密码。
-            const savedPassword = sessionStorage.getItem('servicePassword');
-            servicePassword = savedPassword || DEFAULT_SERVICE_PASSWORD;
-            isAuthenticated = true;
-            sessionStorage.setItem('servicePassword', servicePassword);
-
-            // showTab 会立即触发 loadInstances() 等带鉴权的请求，
-            // 所以必须放在 servicePassword 赋值之后，否则会 401。
-            showTab('workbench');
-            showDashboardPage();
-            loadDashboard();
 
             // 添加键盘快捷键支持
             document.addEventListener('keydown', handleKeyboardShortcuts);
-            
+
             // 定期刷新仪表盘数据
             setInterval(() => {
                 if (isAuthenticated && document.getElementById('dashboard').classList.contains('active')) {
                     loadDashboard();
                 }
             }, 30000); // 每30秒刷新一次
+
+            // 已授权过（刷新页面）才直接进面板，否则停在登录页等授权。
+            if (sessionStorage.getItem(LOGIN_FLAG)) {
+                enterDashboard();
+            } else {
+                showLoginPage();
+            }
         });
+
+        // 页面切换：登录页
+        function showLoginPage() {
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('dashboardPage').classList.add('hidden');
+        }
+
+        // 进入控制面板：授权成功后与刷新页面时共用
+        function enterDashboard() {
+            const savedPassword = sessionStorage.getItem('servicePassword');
+            servicePassword = savedPassword || DEFAULT_SERVICE_PASSWORD;
+            isAuthenticated = true;
+            sessionStorage.setItem('servicePassword', servicePassword);
+            sessionStorage.setItem(LOGIN_FLAG, '1');
+
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('dashboardPage').classList.remove('hidden');
+
+            // showTab 会立即触发 loadInstances() 等带鉴权的请求，
+            // 所以必须放在 servicePassword 赋值之后，否则会 401。
+            showTab('workbench');
+            loadDashboard();
+        }
+
+        // 登录页：启动 CodeBuddy 授权
+        async function startLoginAuth() {
+            const btn = document.getElementById('loginAuthBtn');
+            const loginError = document.getElementById('loginError');
+            const startBox = document.getElementById('loginAuthStart');
+            const pendingBox = document.getElementById('loginAuthPending');
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在获取认证链接...';
+            loginError.classList.add('hidden');
+
+            try {
+                const response = await fetch('/codebuddy/auth/start?region=internal', { method: 'GET' });
+                const data = await response.json();
+
+                if (!response.ok || !data.verification_uri_complete) {
+                    throw new Error(data.message || '获取认证链接失败');
+                }
+
+                currentAuthData = {
+                    auth_state: data.auth_state,
+                    region: data.region || 'internal'
+                };
+
+                document.getElementById('loginAuthUrl').value = data.verification_uri_complete;
+                startBox.classList.add('hidden');
+                pendingBox.classList.remove('hidden');
+
+                // 自动拉起系统默认浏览器，省去手动点「打开链接」
+                await openLoginAuthUrl(true);
+
+                loginPollSeconds = 0;
+                pollLoginAuth();
+            } catch (error) {
+                showLoginError('❌ ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play"></i> 国内认证';
+            }
+        }
+
+        let loginPollSeconds = 0;
+        let loginPollingInterval = null;
+
+        function pollLoginAuth() {
+            stopLoginPolling();
+            const tick = async () => {
+                if (!currentAuthData) return;
+                try {
+                    const response = await fetch('/codebuddy/auth/poll', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            auth_state: currentAuthData.auth_state,
+                            region: currentAuthData.region
+                        })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok && data.access_token) {
+                        stopLoginPolling();
+                        currentAuthData = null;
+                        enterDashboard();
+                        showNotification('🎉 授权成功，凭证已保存', 'success');
+                        loadCredentials();
+                    } else if (data.error === 'authorization_pending') {
+                        loginPollSeconds += 5;
+                        const el = document.getElementById('loginWaitHint');
+                        if (el) {
+                            const m = Math.floor(loginPollSeconds / 60);
+                            const sec = loginPollSeconds % 60;
+                            el.textContent = `已在后台等待 ${m > 0 ? m + ' 分 ' : ''}${sec} 秒，完成登录后自动进入控制面板`;
+                        }
+                    } else if (data.error === 'expired_token' || data.error === 'access_denied') {
+                        stopLoginPolling();
+                        cancelLoginAuth();
+                        showLoginError(data.error === 'access_denied' ? '授权被拒绝，请重试' : '认证链接已过期，请重新授权');
+                    }
+                } catch (error) {
+                    console.error('登录轮询网络错误:', error);
+                }
+            };
+            tick();
+            loginPollingInterval = setInterval(tick, 5000);
+        }
+
+        function stopLoginPolling() {
+            if (loginPollingInterval) {
+                clearInterval(loginPollingInterval);
+                loginPollingInterval = null;
+            }
+        }
+
+        function cancelLoginAuth() {
+            stopLoginPolling();
+            currentAuthData = null;
+            document.getElementById('loginAuthPending').classList.add('hidden');
+            document.getElementById('loginAuthStart').classList.remove('hidden');
+            document.getElementById('loginAuthUrl').value = '';
+        }
+
+        async function openLoginAuthUrl(silent) {
+            const url = document.getElementById('loginAuthUrl').value;
+            if (!url) { if (!silent) showLoginError('认证链接尚未生成'); return; }
+
+            // 桌面壳里 window.open 不会打开浏览器（WebView 没有标签页体系），
+            // 必须走桥的 open_url 交给系统默认浏览器。
+            const bridge = window.pywebview && window.pywebview.api;
+            if (bridge && bridge.open_url) {
+                try {
+                    const res = await bridge.open_url(url);
+                    if (!(res && res.ok) && !silent) {
+                        showLoginError((res && res.message) || '无法打开浏览器，请手动复制链接');
+                    }
+                    return;
+                } catch (e) {
+                    if (!silent) showLoginError('无法打开浏览器：' + e.message);
+                    return;
+                }
+            }
+
+            const win = window.open(url, '_blank');
+            if (!win && !silent) {
+                showLoginError('浏览器拦截了新窗口，请手动复制链接打开');
+            }
+        }
+
+        async function copyLoginAuthUrl() {
+            const url = document.getElementById('loginAuthUrl').value;
+            if (!url) { showLoginError('认证链接尚未生成'); return; }
+            try {
+                if (navigator.clipboard && window.isSecureContext !== false) {
+                    await navigator.clipboard.writeText(url);
+                    showNotification('认证链接已复制到剪贴板', 'success');
+                    return;
+                }
+                throw new Error('clipboard unavailable');
+            } catch (e) {
+                const input = document.getElementById('loginAuthUrl');
+                input.select();
+                input.setSelectionRange(0, url.length);
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+                showNotification(ok ? '认证链接已复制到剪贴板' : '已选中链接，请按 ⌘C 复制',
+                    ok ? 'success' : 'warning');
+            }
+        }
+
+        function showLoginError(message) {
+            const loginError = document.getElementById('loginError');
+            loginError.textContent = message;
+            loginError.classList.remove('hidden');
+        }
 
         // 键盘快捷键处理
         function handleKeyboardShortcuts(e) {
@@ -2241,61 +2431,18 @@
             notification.classList.remove('show');
         }
 
-        // 页面切换
-        function showDashboardPage() {
-            document.getElementById('loginPage').classList.add('hidden');
-            document.getElementById('dashboardPage').classList.remove('hidden');
-        }
-
-        async function handleLogin(event) {
-            event.preventDefault();
-            const password = document.getElementById('loginPassword').value;
-            const loginButton = document.getElementById('loginButton');
-            const loginError = document.getElementById('loginError');
-
-            if (!password) {
-                showLoginError('请输入密码');
-                return;
-            }
-
-            loginButton.disabled = true;
-            loginButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 验证中...';
-            loginError.classList.add('hidden');
-
-            try {
-                const testResponse = await fetch('/codebuddy/v1/credentials', {
-                    headers: { 'Authorization': `Bearer ${password}` }
-                });
-
-                if (testResponse.status !== 403) {
-                    servicePassword = password;
-                    isAuthenticated = true;
-                    sessionStorage.setItem('servicePassword', password);
-                    
-                    showDashboardPage();
-                    loadDashboard();
-                    showNotification('登录成功！', 'success');
-                } else {
-                    throw new Error('密码错误');
-                }
-            } catch (error) {
-                showLoginError('密码错误，请重试');
-            } finally {
-                loginButton.disabled = false;
-                loginButton.innerHTML = '<i class="fas fa-sign-in-alt"></i> 登录';
-            }
-        }
-        
-        function showLoginError(message) {
-            const loginError = document.getElementById('loginError');
-            loginError.textContent = message;
-            loginError.classList.remove('hidden');
-        }
-        
+        // 退出登录：清除登录态，回到登录页重新授权。
         function logout() {
-            // 不再要求输入密码，重新加载即可回到面板。
             sessionStorage.removeItem('servicePassword');
-            window.location.reload();
+            sessionStorage.removeItem(LOGIN_FLAG);
+            stopLoginPolling();
+            currentAuthData = null;
+            isAuthenticated = false;
+            document.getElementById('loginAuthPending').classList.add('hidden');
+            document.getElementById('loginAuthStart').classList.remove('hidden');
+            document.getElementById('loginAuthUrl').value = '';
+            document.getElementById('loginError').classList.add('hidden');
+            showLoginPage();
         }
 
         // 获取认证头
