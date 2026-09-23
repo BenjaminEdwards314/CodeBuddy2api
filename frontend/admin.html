@@ -2042,6 +2042,10 @@
             showDashboardPage();
             loadDashboard();
 
+            // 上面用的只是「桥还没就绪」时的临时密码。桥就绪后要改用桌面壳里的
+            // 真实密码，并把刚才失败的数据重拉一遍（见 adoptBridgePassword）。
+            waitForBridge().then(adoptBridgePassword);
+
             // 添加键盘快捷键支持
             document.addEventListener('keydown', handleKeyboardShortcuts);
             
@@ -2306,6 +2310,27 @@
             };
         }
 
+        // 用桌面壳里的真实密码替换硬编码默认值。
+        // DEFAULT_SERVICE_PASSWORD 只在桥不可用（用浏览器直接打开面板）时才有
+        // 资格生效：一旦用户在「工作台」保存了别的密码，继续拿默认值发请求会一
+        // 路 403，而 403 会触发 logout() -> reload -> 又是 403，永远刷不出来。
+        function adoptBridgePassword() {
+            const bridge = window.pywebview && window.pywebview.api;
+            if (!bridge || typeof bridge.get_config !== 'function') return;
+            Promise.resolve(bridge.get_config()).then(function(cfg) {
+                const real = cfg && cfg.password;
+                if (!real || real === servicePassword) return;
+                servicePassword = real;
+                sessionStorage.setItem('servicePassword', real);
+                // 刚才那批请求用的是旧密码，全都失败了，这里重新拉一次。
+                loadInstances();
+                loadDashboard();
+                if (document.getElementById('credentials').classList.contains('active')) {
+                    loadCredentials();
+                }
+            }).catch(function() {});
+        }
+
         // 仪表板相关功能
         async function loadDashboard() {
             // 更新服务状态
@@ -2496,11 +2521,33 @@
                     credentialsList.innerHTML = '<div class="status status-error">认证失败，请重新登录</div>';
                     logout();
                 } else {
-                    credentialsList.innerHTML = `<div class="status status-error">加载失败: ${response.status}</div>`;
+                    const detail = await readErrorDetail(response);
+                    credentialsList.innerHTML = `<div class="status status-error">加载失败: ${response.status}${detail}</div>`;
+                    // 「当前状态」那块在初始 HTML 里就是个转圈动画，只有成功路径
+                    // 会去替换它。失败时若不在这里收尾，它会永远转下去。
+                    setCurrentCredentialStatusError(
+                        `无法获取当前状态 (${response.status})${detail}`
+                    );
                 }
             } catch (error) {
-                credentialsList.innerHTML = `<div class="status status-error">网络错误: ${error.message}</div>`;
+                credentialsList.innerHTML = `<div class="status status-error">网络错误: ${escapeHtml(error.message)}</div>`;
+                setCurrentCredentialStatusError(`网络错误: ${escapeHtml(error.message)}`);
             }
+        }
+
+        // 把服务端的 detail 一并显示出来，避免用户只看到一个干巴巴的状态码。
+        async function readErrorDetail(response) {
+            try {
+                const body = await response.json();
+                return body && body.detail ? ` — ${escapeHtml(String(body.detail))}` : '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function setCurrentCredentialStatusError(message) {
+            const el = document.getElementById('currentCredentialStatus');
+            if (el) el.innerHTML = `<div class="status status-error">${escapeHtml(message)}</div>`;
         }
 
         async function loadCurrentCredentialStatus() {
@@ -2515,10 +2562,11 @@
                     const data = await response.json();
                     displayCurrentCredentialStatus(data);
                 } else {
-                    statusDiv.innerHTML = '<div class="status status-error">无法获取当前状态</div>';
+                    const detail = await readErrorDetail(response);
+                    statusDiv.innerHTML = `<div class="status status-error">无法获取当前状态 (${response.status})${detail}</div>`;
                 }
             } catch (error) {
-                statusDiv.innerHTML = '<div class="status status-error">网络错误</div>';
+                statusDiv.innerHTML = `<div class="status status-error">网络错误: ${escapeHtml(error.message)}</div>`;
             }
         }
 

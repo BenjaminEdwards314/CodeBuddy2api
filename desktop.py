@@ -443,8 +443,14 @@ class DesktopApi:
             return self._fail("启动模式只能是 api_key 或 token。")
         if mode == "api_key" and not api_key:
             return self._fail("API Key 模式下必须填写 API Key。")
-        if mode == "token" and not _token_credential_count():
-            return self._fail("Token 模式下至少需要一个凭证，请先到「凭证管理」添加。")
+        # An empty token-mode pool must NOT block saving. Credentials can only be
+        # added from 「凭证管理」, and every one of its endpoints sits behind the
+        # service-password check — the same password that this very call is what
+        # writes to disk. Rejecting here therefore deadlocks a fresh install: you
+        # cannot save without a credential, and you cannot add a credential
+        # without having saved first. Save anyway; the proxy is off by default
+        # and reports the empty pool when it is actually used.
+        empty_token_pool = mode == "token" and not _token_credential_count()
 
         # Reject a port that someone else already holds (only when changing it).
         port_changed = port_int != self._server.port
@@ -487,14 +493,17 @@ class DesktopApi:
         # the JS promise callback is still pending, which pywebview reports as
         # a console error.
         url = self._server.base_url
+        message = (
+            f"设置已保存，服务已在新端口 {port_int} 重启。"
+            if restarted else "设置已保存。"
+        )
+        if empty_token_pool:
+            message += " 凭证池仍为空，请到「凭证管理」添加凭证后再开启代理。"
         return {
             "ok": True,
             "restarted": restarted,
             "url": url,
-            "message": (
-                f"设置已保存，服务已在新端口 {port_int} 重启。"
-                if restarted else "设置已保存。"
-            ),
+            "message": message,
         }
 
     def restart_server(self) -> dict:
