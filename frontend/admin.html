@@ -3364,12 +3364,30 @@
         }
 
         let authWaitSeconds = 0;
+        let authErrorStreak = 0;
+
+        // 授权链接有效期（与后端 expires_in 一致，30 分钟）。超过就停止轮询，
+        // 否则链接早已失效、界面却一直转圈，用户既不知道原因也退不出来。
+        const AUTH_TIMEOUT_SECONDS = 1800;
+        // 连续网络失败上限：服务重启/断网时不再无声空转。
+        const AUTH_MAX_ERROR_STREAK = 6;
+
+        // 停止轮询并把界面恢复到可重新发起的状态，同时给出明确原因。
+        function failAuth(message) {
+            stopPolling();
+            currentAuthData = null;
+            resetAuthButton();
+            const section = document.getElementById('authUrlSection');
+            if (section) section.style.display = 'none';
+            showNotification('❌ ' + message, 'error', 8000);
+        }
 
         function pollForToken() {
             if (!currentAuthData) return;
 
             stopPolling(); // 清除之前的轮询
             authWaitSeconds = 0;
+            authErrorStreak = 0;
             
             const poll = async () => {
                 try {
@@ -3385,6 +3403,7 @@
                     });
 
                     const data = await response.json();
+                    authErrorStreak = 0; // 拿到响应即视为链路正常
 
                     if (response.ok && data.access_token) {
                         // 认证成功
@@ -3404,33 +3423,39 @@
                     } else if (data.error === 'authorization_pending') {
                         // 继续等待用户授权：在界面上显示已等待时长
                         authWaitSeconds += 5;
+
+                        // 超出链接有效期就收手，避免无限转圈
+                        if (authWaitSeconds >= AUTH_TIMEOUT_SECONDS) {
+                            failAuth('认证链接已过期（等待超过 30 分钟），请重新点击「国内认证」获取新链接');
+                            return;
+                        }
+
                         const el = document.getElementById('authWaitHint');
                         if (el) {
                             const m = Math.floor(authWaitSeconds / 60);
                             const sec = authWaitSeconds % 60;
-                            el.textContent = `已在后台等待 ${m > 0 ? m + ' 分 ' : ''}${sec} 秒，完成登录后会自动保存`;
+                            const left = Math.max(0, Math.floor((AUTH_TIMEOUT_SECONDS - authWaitSeconds) / 60));
+                            el.textContent = `已在后台等待 ${m > 0 ? m + ' 分 ' : ''}${sec} 秒，完成登录后会自动保存（链接约剩 ${left} 分钟）`;
                         }
                     } else if (data.error === 'slow_down') {
                         // 减慢轮询频率
                         console.log('减慢轮询频率');
                     } else if (data.error === 'expired_token') {
-                        // Token过期，停止轮询
-                        stopPolling();
-                        showNotification('认证链接已过期，请重新开始认证', 'warning');
-                        resetAuthButton();
-                        document.getElementById('authUrlSection').style.display = 'none';
+                        failAuth('认证链接已过期，请重新点击「国内认证」获取新链接');
                     } else if (data.error === 'access_denied') {
-                        // 用户拒绝授权
-                        stopPolling();
-                        showNotification('用户拒绝了授权请求', 'warning');
-                        resetAuthButton();
-                        document.getElementById('authUrlSection').style.display = 'none';
+                        failAuth('授权被拒绝，请重新发起认证');
                     } else {
-                        // 其他错误
-                        console.error('轮询错误:', data);
+                        // 其他错误：把后端的说明透出来，而不是只写控制台
+                        failAuth(data.error_description || data.detail || '认证过程发生错误，请重试');
                     }
                 } catch (error) {
-                    console.error('轮询网络错误:', error);
+                    // 服务重启或断网：连续失败到上限就停，避免无声空转。
+                    authErrorStreak += 1;
+                    if (authErrorStreak >= AUTH_MAX_ERROR_STREAK) {
+                        failAuth('无法连接服务，请确认服务仍在运行后重新认证');
+                    } else {
+                        console.error('轮询网络错误:', error);
+                    }
                 }
             };
 
