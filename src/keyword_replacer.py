@@ -3,8 +3,42 @@
 防止CodeBuddy检测到竞争对手关键词
 """
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+# Claude Code CLI（2.1.x 起）会把计费标记注入 system prompt 首行，形如：
+#   x-anthropic-billing-header: cc_version=2.1.278.785; cc_entrypoint=cli;
+# 该标记会被 CodeBuddy 上游识别为「未授权渠道」调用，返回 11128
+# （The request was blocked by security policy），必须整段剥离。
+_BILLING_HEADER_RE = re.compile(
+    r"x-anthropic-billing-header:\s*(?:[A-Za-z0-9_.\-]+\s*=\s*[^;\s]*\s*;?\s*)+",
+    re.IGNORECASE,
+)
+
+# 兜底：若 header 段结构异常（未按 k=v; 形式出现），至少中性化特征 token
+_BILLING_TOKEN = "x-anthropic-billing-header"
+_BILLING_TOKEN_RE = re.compile(re.escape(_BILLING_TOKEN), re.IGNORECASE)
+
+
+def strip_anthropic_billing_header(text: str) -> str:
+    """
+    剥离 Claude Code 注入的 x-anthropic-billing-header 计费标记
+
+    Args:
+        text: 待处理文本
+
+    Returns:
+        str: 剥离后的文本
+    """
+    if not isinstance(text, str) or "anthropic-billing-header" not in text.lower():
+        return text
+
+    cleaned = _BILLING_HEADER_RE.sub("", text)
+    if "anthropic-billing-header" in cleaned.lower():
+        cleaned = _BILLING_TOKEN_RE.sub("x-codebuddy-billing-hint", cleaned)
+    return cleaned
 
 
 def apply_keyword_replacement(text: str) -> str:
@@ -19,6 +53,9 @@ def apply_keyword_replacement(text: str) -> str:
     """
     if not isinstance(text, str):
         return text
+
+    # 先剥离 Claude Code 注入的计费标记（否则上游按未授权渠道拦截，返回 11128）
+    text = strip_anthropic_billing_header(text)
 
     # 定义替换规则
     replacements = {

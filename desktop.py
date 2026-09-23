@@ -29,7 +29,7 @@ from typing import Optional
 APP_NAME = "CodeBuddy2API"
 
 # --- Version / update check ------------------------------------------------
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 # Where update information is read from. Update checks compare this build's
 # commit against the latest commit on the default branch of this repo, so it
