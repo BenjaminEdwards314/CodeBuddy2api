@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="CodeBuddy2API",
     description="CodeBuddy API proxy with OpenAI-compatible interface",
-    version="1.1.3",
+    version="1.1.4",
     lifespan=lifespan
 )
 
@@ -158,7 +158,7 @@ async def root():
     """根路径信息"""
     return {
         "service": "CodeBuddy2API",
-        "version": "1.1.3",
+        "version": "1.1.4",
         "description": "CodeBuddy API proxy with OpenAI-compatible interface",
         "endpoints": {
             "models": "/codebuddy/v1/models",
