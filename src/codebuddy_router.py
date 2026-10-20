@@ -646,7 +646,14 @@ class RequestProcessor:
         if len(messages) == 1 and messages[0].get("role") == "user":
             system_msg = {"role": "system", "content": "You are a helpful assistant."}
             payload["messages"] = [system_msg] + messages
-        
+
+        # developer role 归一化：OpenAI 新规范用 developer 替代 system，
+        # 部分客户端（如 dsh）会直接发送 developer role。CodeBuddy 上游不认该 role，
+        # 会按「非官方客户端」拦截并返回 11128（Illegal API invocation from an unapproved channel）。
+        for msg in payload.get("messages", []):
+            if msg.get("role") == "developer":
+                msg["role"] = "system"
+
         # 应用关键词替换
         for msg in payload.get("messages", []):
             if msg.get("role") == "system":
