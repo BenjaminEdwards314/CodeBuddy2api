@@ -496,6 +496,27 @@ class StreamResponseAggregator:
         
         return final_response
 
+def _dump_failed_payload(payload: Dict[str, Any], status_code: int, error_msg: str) -> None:
+    """把触发上游渠道风控（11128）的请求完整落盘，便于本地复现排查。
+
+    仅当错误信息包含 11128 时写文件，避免正常请求产生无用文件。
+    """
+    if "11128" not in error_msg:
+        return
+    try:
+        import os as _os
+        import tempfile as _tempfile
+        path = _os.path.join(_tempfile.gettempdir(), "codebuddy_fail_11128.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"status": status_code, "error": error_msg[:2000], "payload": payload},
+                f, ensure_ascii=False, indent=2, default=str,
+            )
+        logger.warning(f"11128 失败请求已保存到 {path}")
+    except Exception as e:
+        logger.error(f"保存 11128 失败请求时出错: {e}")
+
+
 class CodeBuddyStreamService:
     """CodeBuddy 流式服务类 - 职责分离，使用连接池优化"""
     
@@ -523,6 +544,7 @@ class CodeBuddyStreamService:
                 if response.status_code != 200:
                     error_text = await response.aread()
                     error_msg = error_text.decode('utf-8', errors='ignore')
+                    _dump_failed_payload(payload, response.status_code, error_msg)
                     yield format_sse_error(f"CodeBuddy API error: {response.status_code} - {error_msg}", "api_error")
                     return
                 
@@ -591,6 +613,7 @@ class CodeBuddyStreamService:
             
             if response.status_code != 200:
                 error_msg = response.text
+                _dump_failed_payload(payload, response.status_code, error_msg)
                 self._handle_api_error(response.status_code, error_msg)
             
             aggregator = StreamResponseAggregator()

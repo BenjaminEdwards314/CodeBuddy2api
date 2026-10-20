@@ -57,13 +57,21 @@ def apply_keyword_replacement(text: str) -> str:
     # 先剥离 Claude Code 注入的计费标记（否则上游按未授权渠道拦截，返回 11128）
     text = strip_anthropic_billing_header(text)
 
-    # 定义替换规则
+    # 定义替换规则（顺序敏感：长词在前，避免被短词先截断）
     replacements = {
         "Claude Code": "CodeBuddy Code",
         "Anthropic's official CLI for Claude": "Tencent's official CLI for CodeBuddy",
         "Claude": "CodeBuddy",
         "Anthropic": "Tencent",
-        "https://github.com/anthropics/claude-code/issues": "https://cnb.cool/codebuddy/codebuddy-code/-/issues"
+        "https://github.com/anthropics/claude-code/issues": "https://cnb.cool/codebuddy/codebuddy-code/-/issues",
+        # DeepSeek 系 Agent 客户端（如 dsh）会把产品名写进 system prompt，
+        # 形如 "You are an AI agent powered by DeepSeek Harness."。
+        # 上游仅校验 system 消息，命中该产品名即按「非官方客户端」拦截并返回 11128。
+        # 单独出现 "DeepSeek" 一词不会触发，但为保险一并做中性化处理。
+        "DeepSeek Harness": "CodeBuddy Harness",
+        "DeepSeek-Harness": "CodeBuddy Harness",
+        "deepseek harness": "CodeBuddy Harness",
+        "DeepSeek": "CodeBuddy",
     }
 
     original_text = text
